@@ -1,0 +1,1607 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+library(dplyr) # version 1.1.4
+library(ggplot2) # version 3.5.2
+library(tidyr) # version 1.3.1
+library(ggpubr) # version 0.6.0
+library(FSA)
+library(dunn.test)
+library(purrr)
+library(stringr)
+library(viridis) 
+```
+#load data
+```{r}
+data<-read.csv("ALL_DATA.csv") #can change back to ALL_DATA.csv for oringial tranformation
+data$infected_parasites=as.factor(data$infected_parasites)
+
+```
+#Filter Data
+
+```{r}
+#works 10/15??
+dataWithMElaSTypes <- data %>%
+  mutate(
+    Type = case_when(
+      (logFC_3v0 >= -0.3 & logFC_3v0 <= 0.3) & (logFC_12v3>=-0.3 & logFC_12v3 <= 0.3)  ~ "flat",
+      (logFC_3v0 >= -0.3 & logFC_3v0 <= 0.3) & (logFC_12v3 > 0.3) ~ "flat_up",
+      (logFC_3v0 >= -0.3 & logFC_3v0 <= 0.3) & (logFC_12v3 < -0.3) ~ "flat_down",
+      (logFC_3v0 > 0.3) & (logFC_12v3>=-0.3 & logFC_12v3<=0.3) ~ "up_flat",
+      (logFC_3v0 < -0.3) & (logFC_12v3>=-0.3 & logFC_12v3<=0.3) ~ "down_flat",
+      (logFC_12v3 > 0.3 & logFC_3v0 > 0.3) ~ "up_up",
+      (logFC_12v3 < -0.3 & logFC_3v0 < -0.3) ~ "down_down",
+      (logFC_3v0 > 0.3) & (logFC_12v3 < -0.3) ~ "up_down",
+      (logFC_3v0 < -0.3) & (logFC_12v3 > 0.3) ~ "down_up"
+    )
+  )
+# for 24 weeks analysis
+dataWithMElaSTypes <- dataWithMElaSTypes %>%
+  mutate(
+    Type_24w = case_when(FC_24w >= FC_12w ~ "up", FC_24w <= FC_12w ~ "down"))
+      
+noflatData<-filter(dataWithMElaSTypes, Type!="flat", )
+
+dataWithMElaSTypes$organ <- factor(dataWithMElaSTypes$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+#write.csv(dataWithMElaSTypes, "dataWithMElaSTypes.csv")
+
+dataWithMElaSTypes <- dataWithMElaSTypes %>%
+  mutate(extracted_ID = str_remove_all(ID, "X(\\d+).(\\d+)_(\\d+).(\\d+)_"))
+```
+
+```{r}
+#overlap of metabolites among different organs
+noflatData_overlapping <- noflatData %>%
+  group_by(ID) %>%
+  mutate(count_occurrences = n()) %>%
+  ungroup() 
+
+
+# most overlapped top metabolite
+
+all_top_df <- data.frame()
+for (organ in unique(dataWithMElaSTypes$organ)) {
+  temp <- dataWithMElaSTypes[dataWithMElaSTypes$organ == organ,]
+  
+  top<-top_n(temp, 50, MElaS) #metabolites with top MElaS scores
+  all_top_df <- rbind(all_top_df, top)
+}
+
+top_overlap <- all_top_df %>%
+  group_by(ID) %>%
+  mutate(count_occurrences = n()) %>%
+  ungroup()
+
+
+all_bottom_df <- data.frame()
+for (organ in unique(dataWithMElaSTypes$organ)) {
+  temp <- dataWithMElaSTypes[dataWithMElaSTypes$organ == organ,]
+  
+  bottom<-top_n(temp, -50, MElaS) #metabolites with lowest MElaS scores
+  bottom <- bottom[sample(nrow(bottom), 50), ]
+  all_bottom_df <- rbind(all_bottom_df, bottom)
+}
+```
+
+```{r}
+JR_1000_noflatData<- noflatData %>%
+  filter(parasite_species=="JR", infected_parasites=="1000")
+
+JR_100_noflatData<- noflatData %>%
+  filter(parasite_species=="JR", infected_parasites=="100")
+
+CL_1000_noflatData<- noflatData %>%
+  filter(parasite_species=="CL", infected_parasites=="1000")
+
+CL_100_noflatData<- noflatData %>%
+  filter(parasite_species=="CL", infected_parasites=="100")
+```
+
+#JR, 1000 Analysis
+
+```{r}
+#Top MElaS
+noflatDatalist = list()
+for (organ in unique(JR_1000_noflatData$organ)) {
+  temp <- JR_1000_noflatData[JR_1000_noflatData$organ == organ,]
+  
+  top<-top_n(temp, 10, MElaS) #metabolites with top MElaS scores
+  
+  long_noflatData <- pivot_longer(top, cols = c(logFC_3v0, logFC_12v3),names_to = "Ratio", values_to = "LogFC")
+  long_noflatData$Ratio <- gsub("Ratio", "", long_noflatData$Ratio)
+  p=ggplot(long_noflatData, aes(x = Ratio, y = LogFC, group = ID, color=ID)) + geom_line(alpha = 0.6) + geom_point() + labs(title = paste0("Top Ten MElas Endpoint Ratios in ", organ), x = "Endpoint Ratio", y = "lnFC", color="Metabolites", group="Metabolites")+ theme_minimal() 
+  p +  theme(axis.text=element_text(size=10), axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+  noflatDatalist[[length(noflatDatalist) + 1]] <- top
+}
+all_top_MElaSJR1000_df<-do.call(rbind, noflatDatalist)
+```
+
+```{r}
+#Bottom MElaS
+noflatDatalist2 = list()
+for (organ in unique(JR_1000_noflatData$organ)) {
+  temp <- JR_1000_noflatData[JR_1000_noflatData$organ == organ,]
+  
+  bottom<-top_n(temp, -10, MElaS) #metabolites with lowest MElaS scores
+  bottom <- bottom[sample(nrow(bottom), 10), ] #randomly sample 10
+  long_noflatData <- pivot_longer(bottom, cols = c(logFC_3v0, logFC_12v3), 
+                          names_to = "Ratio", values_to = "LogFC")
+  long_noflatData$Ratio <- gsub("Ratio", "", long_noflatData$Ratio)
+  p=ggplot(long_noflatData, aes(x = Ratio, y = LogFC, group = ID, color=ID)) +
+  geom_line(alpha = 0.6) +
+  geom_point() +
+  labs(title = paste0("Bottom Ten MElas EndpointRatios in ", organ),
+       x = "Endpoint Ratio", y = "lnFC", group="Metabolite", color="Metabolite") +
+  theme_minimal()
+  p+  
+		theme(axis.text=element_text(size=10),
+				axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+  noflatDatalist2[[length(noflatDatalist2) + 1]] <- bottom
+
+}
+all_bottom_MElaSJR1000_df<-do.call(rbind, noflatDatalist2)
+```
+#boxplot comparing peak areas of each top MElaS metabolites by post infection days and condition
+```{r}
+#load metadata
+metadata<-read.csv("DisTol_mergeddata.csv") #load data can use CLR_transformed_metadata or DisTol_mergeddata
+metadata<-na.omit(metadata)
+ATTRIBUTE_infected_parasites<-as.factor(metadata$ATTRIBUTE_infected_parasites)
+ATTRIBUTE_endpoint<-as.factor(metadata$ATTRIBUTE_endpoint)
+#metadata<-filter(metadata, ATTRIBUTE_endpoint!="24w", )
+metadata<-filter(metadata, ATTRIBUTE_infected_parasites!='10000', )
+
+#only if you are doing CLR transformation
+#my_data <- metadata[, -c(1, 2, 3, 4, 5, 6)]
+#min(my_data[my_data != 0]) #just gives you the minimum
+
+
+#data_rclr_min_value <- min(my_data)
+#my_data[my_data == 0] = data_rclr_min_value #change 0w values to min instead of 0
+
+#metadata <- merge(
+ # metadata[, 1:5],
+  #my_data,
+ # by = "row.names"
+#)
+
+#rownames(metadata) <- metadata$Row.names
+#metadata$Row.names <- NULL
+#which(names(metadata)=="bar")
+```
+
+```{r}
+JR_1000_metadata <- metadata %>%
+  filter(ATTRIBUTE_parasite_species!="CL_Luc", ATTRIBUTE_infected_parasites!="100") %>%
+  mutate(ATTRIBUTE_infected_parasites=case_when(ATTRIBUTE_infected_parasites == '0'  ~ 'uninfected', ATTRIBUTE_infected_parasites=='1000' ~ 'infected')) %>%
+    mutate(ATTRIBUTE_endpoint = factor(ATTRIBUTE_endpoint, levels = c("0w", "3w", "12w", "24w")), ATTRIBUTE_infected_parasites=factor(ATTRIBUTE_infected_parasites, levels=c('uninfected', 'infected')))
+
+```
+
+#code for visualization of top metabolite boxplots (for presentation)
+
+```{r}
+all_top_MElaSJR1000_df_Heart_D<-filter(all_top_MElaSJR1000_df, organ=="Heart_D")
+top_metabolite<-all_top_MElaSJR1000_df_Heart_D$ID 
+column_list <- list()
+for (name in top_metabolite) {
+  column_list[[name]] <- metadata[[name]] 
+} #make a dataset that only includes metabolites with top MElas scores
+
+new_df <- as.data.frame(column_list)
+new_df<-cbind(new_df, metadata[c(1,2,3, 4, 5)]) #make new dataset with data set of top 10 metabolites and all samples
+
+new_df <- new_df %>%
+  filter(ATTRIBUTE_parasite_species!="CL_Luc", ATTRIBUTE_infected_parasites!="100") %>%
+  filter(ATTRIBUTE_organ=="Heart_D") %>%
+  mutate(ATTRIBUTE_infected_parasites=case_when(ATTRIBUTE_infected_parasites == '0'  ~ 'uninfected', ATTRIBUTE_infected_parasites=='1000' ~ 'infected')) %>%
+    mutate(ATTRIBUTE_endpoint = factor(ATTRIBUTE_endpoint, levels = c("0w", "3w", "12w", "24w")), ATTRIBUTE_infected_parasites=factor(ATTRIBUTE_infected_parasites, levels=c('uninfected', 'infected')))
+
+#boxplot comparing peak areas of each top MElaS metabolites by post infection days and condition. A box plot is produced for each metabolite 
+for (metabolite in top_metabolite) {
+  print(metabolite)
+                                                              #this was changed to log(.data[[metabolite]]+1 dont know why)
+  plot<-ggplot(new_df, aes(x = as.factor(ATTRIBUTE_endpoint), y = (.data[[metabolite]]), fill = as.factor(ATTRIBUTE_infected_parasites))) +
+  geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA) +
+  labs(title=paste0("Peak Area of Top MElaS ", metabolite), x = "Endpoint (weeks)", y = "Peak Area", fill="Infection Status") + geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+                  alpha = 0.5, size = 0.9) +theme_bw() + scale_fill_manual(values = c("infected" = "red", "uninfected" = "grey")) +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(legend.text=element_text(size=13))+  theme(legend.title=element_text(size=rel(1.8)))
+  print(plot)
+  plotname <- paste0("images2/", metabolite, "boxplot.png")
+  ggsave(plotname, dpi = 300)
+  
+}
+```
+
+#code for visualization of bottom metabolite boxplots (for presentation)
+
+```{r}
+all_bottom_MElaSJR1000_df_Heart_D<-filter(all_bottom_MElaSJR1000_df, organ=="Heart_D")
+bottom_metabolite<-all_bottom_MElaSJR1000_df_Heart_D$ID 
+column_list <- list()
+for (name in bottom_metabolite) {
+  column_list[[name]] <- metadata[[name]] 
+} #make a dataset that only includes metabolites with top MElas scores
+
+new_df <- as.data.frame(column_list)
+new_df<-cbind(new_df, metadata[c(1,2,3, 4, 5)]) #make new dataset with data set of top 10 metabolites and all samples
+
+new_df <- new_df %>%
+  filter(ATTRIBUTE_parasite_species!="CL_Luc", ATTRIBUTE_infected_parasites!="100") %>%
+  filter(ATTRIBUTE_organ=="Heart_D") %>%
+  mutate(ATTRIBUTE_infected_parasites=case_when(ATTRIBUTE_infected_parasites == '0'  ~ 'uninfected', ATTRIBUTE_infected_parasites=='1000' ~ 'infected')) %>%
+    mutate(ATTRIBUTE_endpoint = factor(ATTRIBUTE_endpoint, levels = c("0w", "3w", "12w", "24w")), ATTRIBUTE_infected_parasites=factor(ATTRIBUTE_infected_parasites, levels=c('uninfected', 'infected')))
+
+#boxplot comparing peak areas of each top MElaS metabolites by post infection days and condition. A box plot is produced for each metabolite 
+for (metabolite in bottom_metabolite) {
+  print(metabolite)
+  
+  plot<-ggplot(new_df, aes(x = as.factor(ATTRIBUTE_endpoint), y = (.data[[metabolite]]), fill = as.factor(ATTRIBUTE_infected_parasites))) +
+  geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA) +
+  labs(title=paste0("Peak Area of Bottom MElaS ", metabolite), x = "Endpoint (weeks)", y = "Peak Area", fill="Infection Status") + geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+                  alpha = 0.5, size = 0.9) +theme_bw() + scale_fill_manual(values = c("infected" = "red", "uninfected" = "grey")) +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(legend.text=element_text(size=13))+  theme(legend.title=element_text(size=rel(1.8)))
+  print(plot)
+  plotname <- paste0("images2/", metabolite, "boxplot_bottom.png")
+  ggsave(plotname, dpi = 300)
+}
+```
+
+#boxplot comparing peak areas of each top MElaS metabolites by post infection days and condition
+#shows all top metabolites on a plot
+```{r}
+
+plots <- all_top_MElaSJR1000_df %>%
+  split(.$organ) %>%
+  imap(function(df, organ_name) {
+    # Get the top metabolite names for this organ
+    top_metabolites <- df$ID
+    
+    # Subset peak data for this organ and those metabolites
+    subset_data <- JR_1000_metadata  %>%
+      filter(ATTRIBUTE_organ == organ_name) %>%
+      select(ATTRIBUTE_infected_parasites, ATTRIBUTE_organ, ATTRIBUTE_endpoint, all_of(top_metabolites)) %>%
+      pivot_longer(cols = all_of(top_metabolites),
+                   names_to = "metabolite", values_to = "peak_area")
+    
+    # Make boxplots comparing endpointspoints
+    p <- ggplot(subset_data, aes(x = ATTRIBUTE_endpoint, y = peak_area, fill = ATTRIBUTE_infected_parasites)) +
+      geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA) +
+      facet_wrap(~ metabolite, scales = "free_y", ncol = 5) +
+      theme_bw(base_size = 9) +
+      labs(title = paste("Top 10 Metabolites in", organ_name, 'for JR, 1000'),
+           y = "Peak Area", x = "Endpoint", fill="Infection Status") +
+      theme(legend.position = "top",
+            strip.text = element_text(face = "bold"))+ geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+                  alpha = 0.5, size = 0.9) 
+    
+    print(p)
+  })
+```
+
+#boxplot comparing peak areas of each bottom MElaS metabolites by post infection days and condition
+#shows all bottom metabolites on a plot
+
+```{r}
+plots <- all_bottom_MElaSJR1000_df %>%
+  split(.$organ) %>%
+  imap(function(df, organ_name) {
+    # Get the top metabolite names for this organ
+    bottom_metabolites <- df$ID
+    
+    # Subset peak data for this organ and those metabolites
+    subset_data <- JR_1000_metadata  %>%
+      filter(ATTRIBUTE_organ == organ_name) %>%
+      select(ATTRIBUTE_infected_parasites, ATTRIBUTE_organ, ATTRIBUTE_endpoint, all_of(bottom_metabolites)) %>%
+      pivot_longer(cols = all_of(bottom_metabolites),
+                   names_to = "metabolite", values_to = "peak_area")
+    
+    # Make boxplots comparing timepoints
+    p <- ggplot(subset_data, aes(x = ATTRIBUTE_endpoint, y = peak_area, fill = ATTRIBUTE_infected_parasites)) +
+      geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA) +
+      facet_wrap(~ metabolite, scales = "free_y", ncol = 5) +
+      theme_bw(base_size = 9) +
+      labs(title = paste("Bottom 10 Metabolites in", organ_name, 'for JR, 1000'),
+           y = "Peak Area", x = "Timepoint", fill="Infection Status") +
+      theme(legend.position = "top",
+            strip.text = element_text(face = "bold"))+ geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+                  alpha = 0.5, size = 0.9)
+    
+    print(p)
+  })
+```
+
+
+# Plot top 10 Metabolites and FC_0w, FC_3w and LogFC12w
+
+```{r}
+all_top_MElaSJR1000_df<-filter(all_top_MElaSJR1000_df, organ=="Heart_D")
+for (organ in unique(all_top_MElaSJR1000_df$organ)) {
+  temp <- all_top_MElaSJR1000_df[all_top_MElaSJR1000_df$organ == organ,]
+  
+  long_noflatData_with_time_top <- pivot_longer(temp, cols = c(FC_0w, FC_3w, FC_12w, FC_24w), 
+                          names_to = "Time", values_to = "LogFC")
+  long_noflatData_with_time_top$Time <- factor(long_noflatData_with_time_top$Time, levels=c("FC_0w", "FC_3w", "FC_12w", "FC_24w"))
+  
+  for (metabolite in unique(long_noflatData_with_time_top$ID)) {
+    temp<-long_noflatData_with_time_top[long_noflatData_with_time_top$ID==metabolite, ]
+    p=ggplot(temp, aes(x = Time, y = LogFC, group=1)) + geom_line() + geom_point() + labs(title = paste0("Top MElas: ", metabolite, " FC Between Endpoints in ", organ), x = "Endpoint (weeks)", y = "FC")+ theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(2.8))) + theme(axis.title.x = element_text(size = rel(1.8))) +theme(axis.title.x = element_blank(), axis.text.x = element_blank(), title= element_blank())
+  print(p)
+  plotname2 <- paste0("images2/", metabolite, "lineplot.png")
+  ggsave(plotname2, dpi = 300) 
+
+  }
+}
+```
+
+# Plot Bottom 10 Metabolites and FC_0w, FC_3w and LogFC12w
+```{r}
+all_bottom_MElaSJR1000_df<-filter(all_bottom_MElaSJR1000_df, organ=="Heart_D")
+for (organ in unique(all_bottom_MElaSJR1000_df$organ)) {
+  temp <- all_bottom_MElaSJR1000_df[all_bottom_MElaSJR1000_df$organ == organ,]
+  
+  long_noflatData_with_time_bottom <- pivot_longer(temp, cols = c(FC_0w, FC_3w, FC_12w, FC_24w), 
+                          names_to = "Time", values_to = "LogFC")
+  long_noflatData_with_time_bottom$Time <- factor(long_noflatData_with_time_bottom$Time, levels=c("FC_0w", "FC_3w", "FC_12w", "FC_24w"))
+  
+  for (metabolite in unique(long_noflatData_with_time_bottom$ID)) {
+    temp<-long_noflatData_with_time_bottom[long_noflatData_with_time_bottom$ID==metabolite, ]
+    p=ggplot(temp, aes(x = Time, y = LogFC, group=1)) + geom_line() + geom_point() + labs(title = paste0("Bottom MElas: ", metabolite, " FC Between Endpoints in ", organ), x = "Endpoint Rations", y = "FC")+ theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(2.8))) + theme(axis.title.x = element_text(size = rel(1.8))) +theme(axis.title.x = element_blank(), axis.text.x = element_blank(), title= element_blank())
+  print(p)
+  plotname2 <- paste0("images2/", metabolite, "lineplot_bottom.png")
+  ggsave(plotname2, dpi = 300)
+  }
+}
+
+```
+
+#JR, 100 Analysis (make sure it looks the same as JR 1000 code!!!!)
+
+```{r}
+#Top MElaS
+noflatDatalist = list()
+for (organ in unique(JR_100_noflatData$organ)) {
+  temp <- JR_100_noflatData[JR_100_noflatData$organ == organ,]
+  
+  top<-top_n(temp, 10, MElaS) #metabolites with top MElaS scores
+  
+  long_noflatData <- pivot_longer(top, cols = c(logFC_3v0, logFC_12v3),names_to = "Ratio", values_to = "LogFC")
+  long_noflatData$Ratio <- gsub("Ratio", "", long_noflatData$Ratio)
+  p=ggplot(long_noflatData, aes(x = Ratio, y = LogFC, group = ID, color=ID)) + geom_line(alpha = 0.6) + geom_point() + labs(title = paste0("Top MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ), "Top MElas LogFC Between LogFC3v0 and LogFC12v3 in ", x = "Post Infection Ratio", y = "LogFC")+ theme_minimal() 
+  p+labs(color="Metabolite") +  theme(axis.text=element_text(size=10), axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+  noflatDatalist[[length(noflatDatalist) + 1]] <- top
+}
+all_top_MElaSJR100_df<-do.call(rbind, noflatDatalist)
+```
+
+```{r}
+#Bottom MElaS
+noflatDatalist2 = list()
+for (organ in unique(JR_100_noflatData$organ)) {
+  temp <- JR_100_noflatData[JR_100_noflatData$organ == organ,]
+  
+  bottom<-top_n(temp, -10, MElaS) #metabolites with lowest MElaS scores
+  bottom <- bottom[sample(nrow(bottom), 10), ] #randomly sample 10
+  long_noflatData <- pivot_longer(bottom, cols = c(logFC_3v0, logFC_12v3), 
+                          names_to = "Ratio", values_to = "LogFC")
+  long_noflatData$Ratio <- gsub("Ratio", "", long_noflatData$Ratio)
+  p=ggplot(long_noflatData, aes(x = Ratio, y = LogFC, group = ID, color=ID)) +
+  geom_line(alpha = 0.6) +
+  geom_point() +
+  labs(title = paste0("Bottom MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ),
+       x = "Post Infection Ratio", y = "LogFC") +
+  theme_minimal()
+  p+labs(color="Metabolite") +  
+		theme(axis.text=element_text(size=10),
+				axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+  noflatDatalist2[[length(noflatDatalist2) + 1]] <- bottom
+
+}
+all_bottom_MElaSJR100_df<-do.call(rbind, noflatDatalist2)
+```
+
+```{r}
+JR_100_metadata <- metadata %>%
+  filter(ATTRIBUTE_parasite_species!="CL_Luc", ATTRIBUTE_infected_parasites!="1000") %>%
+  mutate(ATTRIBUTE_infected_parasites=case_when(ATTRIBUTE_infected_parasites == '0'  ~ 'uninfected', ATTRIBUTE_infected_parasites=='100' ~ 'infected')) %>%
+    mutate(ATTRIBUTE_endpoint = factor(ATTRIBUTE_endpoint, levels = c("0w", "3w", "12w")), ATTRIBUTE_infected_parasites=factor(ATTRIBUTE_infected_parasites, levels=c('uninfected', 'infected')))
+
+```
+
+#boxplot comparing peak areas of each top MElaS metabolites by post infection days and condition
+```{r}
+
+plots <- all_top_MElaSJR100_df %>%
+  split(.$organ) %>%
+  imap(function(df, organ_name) {
+    # Get the top metabolite names for this organ
+    top_metabolites <- df$ID
+    
+    # Subset peak data for this organ and those metabolites
+    subset_data <- JR_100_metadata  %>%
+      filter(ATTRIBUTE_organ == organ_name) %>%
+      select(ATTRIBUTE_infected_parasites, ATTRIBUTE_organ, ATTRIBUTE_endpoint, all_of(top_metabolites)) %>%
+      pivot_longer(cols = all_of(top_metabolites),
+                   names_to = "metabolite", values_to = "peak_area")
+    
+    # Make boxplots comparing timepoints
+    p <- ggplot(subset_data, aes(x = ATTRIBUTE_endpoint, y = peak_area, fill = ATTRIBUTE_infected_parasites)) +
+      geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA) +
+      facet_wrap(~ metabolite, scales = "free_y", ncol = 5) +
+      theme_bw(base_size = 9) +
+      labs(title = paste("Top 10 Metabolites in", organ_name, 'for JR, 100'),
+           y = "Peak Area", x = "Timepoint", fill="Infection Status") +
+      theme(legend.position = "top",
+            strip.text = element_text(face = "bold"))+ geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+                  alpha = 0.5, size = 0.9)
+    
+    print(p)
+  })
+```
+
+#boxplot comparing peak areas of each bottom MElaS metabolites by post infection days and condition
+
+```{r}
+plots <- all_bottom_MElaSJR100_df %>%
+  split(.$organ) %>%
+  imap(function(df, organ_name) {
+    # Get the top metabolite names for this organ
+    bottom_metabolites <- df$ID
+    
+    # Subset peak data for this organ and those metabolites
+    subset_data <- JR_100_metadata  %>%
+      filter(ATTRIBUTE_organ == organ_name) %>%
+      select(ATTRIBUTE_infected_parasites, ATTRIBUTE_organ, ATTRIBUTE_endpoint, all_of(bottom_metabolites)) %>%
+      pivot_longer(cols = all_of(bottom_metabolites),
+                   names_to = "metabolite", values_to = "peak_area")
+    
+    # Make boxplots comparing timepoints
+    p <- ggplot(subset_data, aes(x = ATTRIBUTE_endpoint, y = peak_area, fill = ATTRIBUTE_infected_parasites)) +
+      geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA) +
+      facet_wrap(~ metabolite, scales = "free_y", ncol = 5) +
+      theme_bw(base_size = 9) +
+      labs(title = paste("Bottom 10 Metabolites in", organ_name, 'for JR, 100'),
+           y = "Peak Area", x = "Timepoint", fill="Infection Status") +
+      theme(legend.position = "top",
+            strip.text = element_text(face = "bold"))+ geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+                  alpha = 0.5, size = 0.9)
+    
+    print(p)
+  })
+```
+
+# Plot top 10 Metabolites and FC_0w, FC_3w and LogFC12w
+```{r}
+for (organ in unique(all_top_MElaSJR100_df$organ)) {
+  temp <- all_top_MElaSJR100_df[all_top_MElaSJR100_df$organ == organ,]
+  
+  long_noflatData_with_time_top <- pivot_longer(temp, cols = c(FC_0w, FC_3w, FC_12w), 
+                          names_to = "Time", values_to = "LogFC")
+  long_noflatData_with_time_top$Time <- factor(long_noflatData_with_time_top$Time, levels=c("FC_0w", "FC_3w", "FC_12w"))
+  
+  p=ggplot(long_noflatData_with_time_top, aes(x = Time, y = LogFC, group = ID, color=ID)) + geom_line(alpha = 0.6) + geom_point() + labs(title = paste0("Top MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ), x = "Post Infection Ratio", y = "LogFC")+ theme_minimal() 
+  p+labs(color="Metabolite") +  theme(axis.text=element_text(size=10), axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+}
+```
+
+# Plot Bottom 10 Metabolites and FC_0w, FC_3w and LogFC12w
+```{r}
+
+for (organ in unique(all_bottom_MElaSJR100_df$organ)) {
+  temp <- all_bottom_MElaSJR100_df[all_bottom_MElaSJR100_df$organ == organ,]
+  
+  long_noflatData_with_time_bottom <- pivot_longer(temp, cols = c(FC_0w, FC_3w, FC_12w), 
+                          names_to = "Time", values_to = "LogFC")
+  long_noflatData_with_time_bottom$Time <- factor(long_noflatData_with_time_bottom$Time, levels=c("FC_0w", "FC_3w", "FC_12w"))
+  
+  p=ggplot(long_noflatData_with_time_bottom, aes(x = Time, y = LogFC, group = ID, color=ID)) + geom_line(alpha = 0.6) + geom_point() + labs(title = paste0("Bottom MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ), x = "Post Infection Ratio", y = "LogFC")+ theme_minimal() 
+  p+labs(color="Metabolite") +  theme(axis.text=element_text(size=10), axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+}
+```
+
+# CL, 1000 Analysis
+
+```{r}
+#Top MElaS
+noflatDatalist = list()
+for (organ in unique(CL_1000_noflatData$organ)) {
+  temp <- CL_1000_noflatData[CL_1000_noflatData$organ == organ,]
+  
+  top<-top_n(temp, 10, MElaS) #metabolites with top MElaS scores
+  
+  long_noflatData <- pivot_longer(top, cols = c(logFC_3v0, logFC_12v3),names_to = "Ratio", values_to = "LogFC")
+  long_noflatData$Ratio <- gsub("Ratio", "", long_noflatData$Ratio)
+  p=ggplot(long_noflatData, aes(x = Ratio, y = LogFC, group = ID, color=ID)) + geom_line(alpha = 0.6) + geom_point() + labs(title = paste0("Top MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ), "Top MElas LogFC Between LogFC3v0 and LogFC12v3 in ", x = "Post Infection Ratio", y = "LogFC")+ theme_minimal() 
+  p+labs(color="Metabolite") +  theme(axis.text=element_text(size=10), axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+  noflatDatalist[[length(noflatDatalist) + 1]] <- top
+}
+all_top_MElaSCL1000_df<-do.call(rbind, noflatDatalist)
+```
+
+```{r}
+#Bottom MElaS
+noflatDatalist2 = list()
+for (organ in unique(CL_1000_noflatData$organ)) {
+  temp <- CL_1000_noflatData[CL_1000_noflatData$organ == organ,]
+  
+  bottom<-top_n(temp, -10, MElaS) #metabolites with lowest MElaS scores
+  bottom <- bottom[sample(nrow(bottom), 10), ] #randomly sample 10
+  long_noflatData <- pivot_longer(bottom, cols = c(logFC_3v0, logFC_12v3), 
+                          names_to = "Ratio", values_to = "LogFC")
+  long_noflatData$Ratio <- gsub("Ratio", "", long_noflatData$Ratio)
+  p=ggplot(long_noflatData, aes(x = Ratio, y = LogFC, group = ID, color=ID)) +
+  geom_line(alpha = 0.6) +
+  geom_point() +
+  labs(title = paste0("Bottom MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ),
+       x = "Post Infection Ratio", y = "LogFC") +
+  theme_minimal()
+  p+labs(color="Metabolite") +  
+		theme(axis.text=element_text(size=10),
+				axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+  noflatDatalist2[[length(noflatDatalist2) + 1]] <- bottom
+
+}
+all_bottom_MElaSCL1000_df<-do.call(rbind, noflatDatalist2)
+```
+
+
+```{r}
+CL_1000_metadata <- metadata %>%
+  filter(ATTRIBUTE_parasite_species!="JR_Luc", ATTRIBUTE_infected_parasites!="100") %>%
+  mutate(ATTRIBUTE_infected_parasites=case_when(ATTRIBUTE_infected_parasites == '0'  ~ 'uninfected', ATTRIBUTE_infected_parasites=='1000' ~ 'infected')) %>%
+    mutate(ATTRIBUTE_endpoint = factor(ATTRIBUTE_endpoint, levels = c("0w", "3w", "12w")), ATTRIBUTE_infected_parasites=factor(ATTRIBUTE_infected_parasites, levels=c('uninfected', 'infected')))
+
+```
+
+#boxplot comparing peak areas of each top MElaS metabolites by post infection days and condition
+```{r}
+
+plots <- all_top_MElaSCL1000_df %>%
+  split(.$organ) %>%
+  imap(function(df, organ_name) {
+    # Get the top metabolite names for this organ
+    top_metabolites <- df$ID
+    
+    # Subset peak data for this organ and those metabolites
+    subset_data <- CL_1000_metadata  %>%
+      filter(ATTRIBUTE_organ == organ_name) %>%
+      select(ATTRIBUTE_infected_parasites, ATTRIBUTE_organ, ATTRIBUTE_endpoint, all_of(top_metabolites)) %>%
+      pivot_longer(cols = all_of(top_metabolites),
+                   names_to = "metabolite", values_to = "peak_area")
+    
+    # Make boxplots comparing timepoints
+    p <- ggplot(subset_data, aes(x = ATTRIBUTE_endpoint, y = peak_area, fill = ATTRIBUTE_infected_parasites)) +
+      geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA) +
+      facet_wrap(~ metabolite, scales = "free_y", ncol = 5) +
+      theme_bw(base_size = 9) +
+      labs(title = paste("Top 10 Metabolites in", organ_name, 'for CL, 1000'),
+           y = "Peak Area", x = "Timepoint", fill="Infection Status") +
+      theme(legend.position = "top",
+            strip.text = element_text(face = "bold"))+ geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+                  alpha = 0.5, size = 0.9)
+    
+    print(p)
+  })
+```
+
+#boxplot comparing peak areas of each bottom MElaS metabolites by post infection days and condition
+
+```{r}
+plots <- all_bottom_MElaSCL1000_df %>%
+  split(.$organ) %>%
+  imap(function(df, organ_name) {
+    # Get the top metabolite names for this organ
+    bottom_metabolites <- df$ID
+    
+    # Subset peak data for this organ and those metabolites
+    subset_data <- CL_1000_metadata  %>%
+      filter(ATTRIBUTE_organ == organ_name) %>%
+      select(ATTRIBUTE_infected_parasites, ATTRIBUTE_organ, ATTRIBUTE_endpoint, all_of(bottom_metabolites)) %>%
+      pivot_longer(cols = all_of(bottom_metabolites),
+                   names_to = "metabolite", values_to = "peak_area")
+    
+    # Make boxplots comparing timepoints
+    p <- ggplot(subset_data, aes(x = ATTRIBUTE_endpoint, y = peak_area, fill = ATTRIBUTE_infected_parasites)) +
+      geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA) +
+      facet_wrap(~ metabolite, scales = "free_y", ncol = 5) +
+      theme_bw(base_size = 9) +
+      labs(title = paste("Bottom 10 Metabolites in", organ_name, 'for CL, 1000'),
+           y = "Peak Area", x = "Timepoint", fill="Infection Status") +
+      theme(legend.position = "top",
+            strip.text = element_text(face = "bold"))+ geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+                  alpha = 0.5, size = 0.9)
+    
+    print(p)
+  })
+```
+
+# Plot top 10 Metabolites and FC_0w, FC_3w and LogFC12w
+```{r}
+for (organ in unique(all_top_MElaSCL1000_df$organ)) {
+  temp <- all_top_MElaSCL1000_df[all_top_MElaSCL1000_df$organ == organ,]
+  
+  long_noflatData_with_time_top <- pivot_longer(temp, cols = c(FC_0w, FC_3w, FC_12w), 
+                          names_to = "Time", values_to = "LogFC")
+  long_noflatData_with_time_top$Time <- factor(long_noflatData_with_time_top$Time, levels=c("FC_0w", "FC_3w", "FC_12w"))
+  
+  p=ggplot(long_noflatData_with_time_top, aes(x = Time, y = LogFC, group = ID, color=ID)) + geom_line(alpha = 0.6) + geom_point() + labs(title = paste0("Top MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ), x = "Post Infection Ratio", y = "LogFC")+ theme_minimal() 
+  p+labs(color="Metabolite") +  theme(axis.text=element_text(size=10), axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+}
+```
+
+# Plot Bottom 10 Metabolites and FC_0w, FC_3w and LogFC12w
+```{r}
+for (organ in unique(all_bottom_MElaSCL1000_df$organ)) {
+  temp <- all_bottom_MElaSCL1000_df[all_bottom_MElaSCL1000_df$organ == organ,]
+  
+  long_noflatData_with_time_bottom <- pivot_longer(temp, cols = c(FC_0w, FC_3w, FC_12w), 
+                          names_to = "Time", values_to = "LogFC")
+  long_noflatData_with_time_bottom$Time <- factor(long_noflatData_with_time_top$Time, levels=c("FC_0w", "FC_3w", "FC_12w"))
+  
+  p=ggplot(long_noflatData_with_time_bottom, aes(x = Time, y = LogFC, group = ID, color=ID)) + geom_line(alpha = 0.6) + geom_point() + labs(title = paste0("Bottom MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ), x = "Post Infection Ratio", y = "LogFC")+ theme_minimal() 
+  p+labs(color="Metabolite") +  theme(axis.text=element_text(size=10), axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+}
+```
+
+# CL, 100 Analysis
+
+```{r}
+#Top MElaS
+noflatDatalist = list()
+for (organ in unique(CL_100_noflatData$organ)) {
+  temp <- CL_100_noflatData[CL_100_noflatData$organ == organ,]
+  
+  top<-top_n(temp, 10, MElaS) #metabolites with top MElaS scores
+  
+  long_noflatData <- pivot_longer(top, cols = c(logFC_3v0, logFC_12v3),names_to = "Ratio", values_to = "LogFC")
+  long_noflatData$Ratio <- gsub("Ratio", "", long_noflatData$Ratio)
+  p=ggplot(long_noflatData, aes(x = Ratio, y = LogFC, group = ID, color=ID)) + geom_line(alpha = 0.6) + geom_point() + labs(title = paste0("Top MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ), "Top MElas LogFC Between LogFC3v0 and LogFC12v3 in ", x = "Post Infection Ratio", y = "LogFC")+ theme_minimal() 
+  p+labs(color="Metabolite") +  theme(axis.text=element_text(size=10), axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+  noflatDatalist[[length(noflatDatalist) + 1]] <- top
+}
+all_top_MElaSCL100_df<-do.call(rbind, noflatDatalist)
+```
+
+```{r}
+#Bottom MElaS
+noflatDatalist2 = list()
+for (organ in unique(CL_100_noflatData$organ)) {
+  temp <- CL_100_noflatData[CL_100_noflatData$organ == organ,]
+  
+  bottom<-top_n(temp, -10, MElaS) #metabolites with lowest MElaS scores
+  bottom <- bottom[sample(nrow(bottom), 10), ] #randomly sample 10
+  long_noflatData <- pivot_longer(bottom, cols = c(logFC_3v0, logFC_12v3), 
+                          names_to = "Ratio", values_to = "LogFC")
+  long_noflatData$Ratio <- gsub("Ratio", "", long_noflatData$Ratio)
+  p=ggplot(long_noflatData, aes(x = Ratio, y = LogFC, group = ID, color=ID)) +
+  geom_line(alpha = 0.6) +
+  geom_point() +
+  labs(title = paste0("Bottom MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ),
+       x = "Post Infection Ratio", y = "LogFC") +
+  theme_minimal()
+  p+labs(color="Metabolite") +  
+		theme(axis.text=element_text(size=10),
+				axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+  noflatDatalist2[[length(noflatDatalist2) + 1]] <- bottom
+
+}
+all_bottom_MElaSCL100_df<-do.call(rbind, noflatDatalist2)
+```
+
+```{r}
+CL_100_metadata <- metadata %>%
+  filter(ATTRIBUTE_parasite_species!="JR_Luc", ATTRIBUTE_infected_parasites!="1000") %>%
+  mutate(ATTRIBUTE_infected_parasites=case_when(ATTRIBUTE_infected_parasites == '0'  ~ 'uninfected', ATTRIBUTE_infected_parasites=='100' ~ 'infected')) %>%
+    mutate(ATTRIBUTE_endpoint = factor(ATTRIBUTE_endpoint, levels = c("0w", "3w", "12w")), ATTRIBUTE_infected_parasites=factor(ATTRIBUTE_infected_parasites, levels=c('uninfected', 'infected')))
+
+```
+
+
+#boxplot comparing peak areas of each top MElaS metabolites by post infection days and condition
+```{r}
+
+plots <- all_top_MElaSCL100_df %>%
+  split(.$organ) %>%
+  imap(function(df, organ_name) {
+    # Get the top metabolite names for this organ
+    top_metabolites <- df$ID
+    
+    # Subset peak data for this organ and those metabolites
+    subset_data <- CL_100_metadata  %>%
+      filter(ATTRIBUTE_organ == organ_name) %>%
+      select(ATTRIBUTE_infected_parasites, ATTRIBUTE_organ, ATTRIBUTE_endpoint, all_of(top_metabolites)) %>%
+      pivot_longer(cols = all_of(top_metabolites),
+                   names_to = "metabolite", values_to = "peak_area")
+    
+    # Make boxplots comparing timepoints
+    p <- ggplot(subset_data, aes(x = ATTRIBUTE_endpoint, y = peak_area, fill = ATTRIBUTE_infected_parasites)) +
+      geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA) +
+      facet_wrap(~ metabolite, scales = "free_y", ncol = 5) +
+      theme_bw(base_size = 9) +
+      labs(title = paste("Top 10 Metabolites in", organ_name, 'for CL, 100'),
+           y = "Peak Area", x = "Timepoint", fill="Infection Status") +
+      theme(legend.position = "top",
+            strip.text = element_text(face = "bold"))+ geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+                  alpha = 0.5, size = 0.9)
+    
+    print(p)
+  })
+```
+
+#boxplot comparing peak areas of each bottom MElaS metabolites by post infection days and condition
+
+```{r}
+plots <- all_bottom_MElaSCL100_df %>%
+  split(.$organ) %>%
+  imap(function(df, organ_name) {
+    # Get the top metabolite names for this organ
+    bottom_metabolites <- df$ID
+    
+    # Subset peak data for this organ and those metabolites
+    subset_data <- CL_100_metadata  %>%
+      filter(ATTRIBUTE_organ == organ_name) %>%
+      select(ATTRIBUTE_infected_parasites, ATTRIBUTE_organ, ATTRIBUTE_endpoint, all_of(bottom_metabolites)) %>%
+      pivot_longer(cols = all_of(bottom_metabolites),
+                   names_to = "metabolite", values_to = "peak_area")
+    
+    # Make boxplots comparing timepoints
+    p <- ggplot(subset_data, aes(x = ATTRIBUTE_endpoint, y = peak_area, fill = ATTRIBUTE_infected_parasites)) +
+      geom_boxplot(position = position_dodge(width = 0.8), outlier.shape = NA) +
+      facet_wrap(~ metabolite, scales = "free_y", ncol = 5) +
+      theme_bw(base_size = 9) +
+      labs(title = paste("Bottom 10 Metabolites in", organ_name, 'for CL, 100'),
+           y = "Peak Area", x = "Timepoint", fill="Infection Status") +
+      theme(legend.position = "top",
+            strip.text = element_text(face = "bold"))+ geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+                  alpha = 0.5, size = 0.9)
+    
+    print(p)
+  })
+```
+
+# Plot top 10 Metabolites and FC_0w, FC_3w and LogFC12w
+```{r}
+for (organ in unique(all_top_MElaSCL100_df$organ)) {
+  temp <- all_top_MElaSCL100_df[all_top_MElaSCL100_df$organ == organ,]
+  
+  long_noflatData_with_time_top <- pivot_longer(temp, cols = c(FC_0w, FC_3w, FC_12w), 
+                          names_to = "Time", values_to = "LogFC")
+  long_noflatData_with_time_top$Time <- factor(long_noflatData_with_time_top$Time, levels=c("FC_0w", "FC_3w", "FC_12w"))
+  
+  p=ggplot(long_noflatData_with_time_top, aes(x = Time, y = LogFC, group = ID, color=ID)) + geom_line(alpha = 0.6) + geom_point() + labs(title = paste0("Top MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ), x = "Post Infection Ratio", y = "LogFC")+ theme_minimal() 
+  p+labs(color="Metabolite") +  theme(axis.text=element_text(size=10), axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+}
+```
+
+# Plot Bottom 10 Metabolites and FC_0w, FC_3w and LogFC12w
+```{r}
+for (organ in unique(all_bottom_MElaSCL100_df$organ)) {
+  temp <- all_bottom_MElaSCL100_df[all_bottom_MElaSCL100_df$organ == organ,]
+  
+  long_noflatData_with_time_bottom <- pivot_longer(temp, cols = c(FC_0w, FC_3w, FC_12w), 
+                          names_to = "Time", values_to = "LogFC")
+  long_noflatData_with_time_bottom$Time <- factor(long_noflatData_with_time_top$Time, levels=c("FC_0w", "FC_3w", "FC_12w"))
+  
+  p=ggplot(long_noflatData_with_time_bottom, aes(x = Time, y = LogFC, group = ID, color=ID)) + geom_line(alpha = 0.6) + geom_point() + labs(title = paste0("Bottom MElas LogFC Between LogFC3v0 and LogFC12v3 in ", organ), x = "Post Infection Ratio", y = "LogFC")+ theme_minimal() 
+  p+labs(color="Metabolite") +  theme(axis.text=element_text(size=10), axis.title=element_text(size=20),plot.title = element_text(size=22, hjust=0.5))+theme(legend.text = element_text(size = 10), legend.title = element_text(size = 15))
+  print(p)
+}
+```
+
+# Boxplots comparing parasite load and species for all organs (can use next chunk to make boxplots)
+```{r}
+
+for (organ in unique(noflatData$organ)) {
+
+  temp <- noflatData[noflatData$organ == organ, ]
+
+  # Create combined category for coloring
+  temp$strain_conc <- paste0(temp$parasite_species, "_", temp$infected_parasites)
+
+  # Define colors
+  fill_colors <- c(
+    "CL_100"  = "#55DDE0",  # light blue
+    "CL_1000" = "#33658A",  # dark blue
+    "JR_100"  = "#FFB4B4",  # light red
+    "JR_1000" = "#950606"   # dark red
+  )
+
+  plot <- ggplot(temp, aes(
+      x = parasite_species,
+      y = MElaS,
+      fill = strain_conc
+    )) +
+    geom_boxplot() +
+    stat_compare_means(aes(group = parasite_species),
+                       method = "wilcox.test",
+                       label = "p.signif",
+                       label.x = 1.5,
+                       label.y = 17) +
+    stat_compare_means(aes(group = infected_parasites),
+                       method = "wilcox.test",
+                       label = "p.signif",
+                       label.x = 10,
+                       label.y = 10) +
+    scale_fill_manual(values = fill_colors,
+                      name = "Strain and Load") +
+    ggtitle(paste0("Boxplot Comparing MElaS by Parasite Inoculation \n    and Parasite Strain in the ", organ)) +
+    theme_bw() +
+    theme(
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+      axis.text.y = element_text(size = 13),
+      axis.title.x = element_text(size = rel(1.8)),
+      axis.title.y = element_text(size = rel(1.8)),
+      legend.text = element_text(size = 13),
+      legend.title = element_text(size = rel(1.8)),
+      plot.title = element_text(size = 20)
+    ) +
+    labs(x = "Parasite Strain", y = "MElaS")
+
+  print(plot)
+}
+```
+
+
+# p-values comparing CL vs JR at 100 and 1000 and boxplots Works!!!
+```{r}
+noflatData$Group <- paste0(noflatData$parasite_species, "_", noflatData$infected_parasites)
+
+p_values_df <- data.frame(Organ = character(),
+                          Group1 = character(),
+                          Group2 = character(),
+                          Test = character(),
+                          P_Value = numeric(),
+                          Fold_Change = numeric(),
+                          stringsAsFactors = FALSE)
+
+OrganList <- c(unique(noflatData$organ))
+for (Organ in OrganList){
+  print(Organ)
+  temp <- noflatData[noflatData$organ == Organ,]
+  comparisons <- combn(levels(factor(temp$Group)), 2, simplify = FALSE)
+  comparisons <- c(comparisons[2], comparisons[5])
+    for (comp in comparisons) {
+      group1 <- comp[1]
+      group2 <- comp[2]
+      
+      # Subset data for the two groups
+      temp_subset <- temp[temp$Group %in% c(group1, group2), ]
+      
+      if (length(unique(temp_subset[temp_subset$Group == group1,]$MElaS)) > 1 & length(temp_subset[temp_subset$Group == group1,]$MElaS) > 2) {
+        normalcy1 <- shapiro.test(temp_subset[temp_subset$Group == group1,]$MElaS)$p.value
+        } else {
+          normalcy1 <- 0 # Force Wilcoxon test if no variability
+        }
+      if (length(unique(temp_subset[temp_subset$Group == group2,]$MElaS)) > 1 & length(temp_subset[temp_subset$Group == group2,]$MElaS) > 2) {
+        normalcy2 <- shapiro.test(temp_subset[temp_subset$Group == group2,]$MElaS)$p.value
+        } else {
+          normalcy2 <- 0 # Force Wilcoxon test if no variability
+        }
+    
+      # Choose the appropriate test based on normality
+      if (normalcy1 < 0.05 | normalcy2 < 0.05) {
+        test_used <- "Wilcoxon"
+        plotTest <- "wilcox.test"
+        p_val <- wilcox.test(MElaS ~ Group, data = temp_subset)$p.value
+      } else {
+        test_used <- "T-test"
+        plotTest <- "t.test"
+        p_val <- t.test(MElaS ~ Group, data = temp_subset)$p.value
+      }
+      
+      
+      fc <- median(temp_subset[temp_subset$Group == group1,]$MElaS)/median(temp_subset[temp_subset$Group == group2,]$MElaS)
+      
+      # Store results in the data frame
+      p_values_df <- rbind(p_values_df, data.frame(
+        Organ = Organ,
+        Group1 = group1,
+        Group2 = group2,
+        Test = test_used,
+        Fold_Change = fc,
+        P_Value = p_val
+      ))
+    }
+  fill_colors <- c(
+    "CL_100"  = "#55DDE0",  # light blue
+    "CL_1000" = "#33658A",  # dark blue
+    "JR_100"  = "#FFB4B4",  # light red
+    "JR_1000" = "#950606"   # dark red
+  )
+  plot <- ggplot(temp, aes(x = parasite_species, y = MElaS, fill = parasite_species)) +
+    facet_wrap(~ infected_parasites) +
+    geom_boxplot(outlier.shape = NA) +
+      stat_compare_means(aes(group = parasite_species), 
+                         method = plotTest, 
+                         label = "p.signif",
+                         label.x = 1.35) +
+    labs(
+      title = paste0(Organ),
+      x = "Parasite Strain",
+      y = "MElaS",
+      fill = "Parasite Strain"
+    ) +
+    scale_fill_manual(values = c("#55DDE0", "#FFB4B4")) +
+    theme_bw() +
+        theme(axis.title.x = element_blank(),           plot.title = element_text(hjust = 0.5))
+    print(plot)
+    #plotname <- paste0("Esophagus_", molecule, ".png")
+    #ggsave(plotname, dpi = 300)
+    
+    
+}
+
+#write.csv(p_values_df, "by_parasite_group_pvalues.csv", row.names = FALSE)
+```
+
+# p-values comparing 100 vs 1000 at JR and CL and boxplots Works!!!
+
+```{r}
+p_values_df_2 <- data.frame(Organ = character(),
+                          Group1 = character(),
+                          Group2 = character(),
+                          Test = character(),
+                          Fold_Change = numeric(),
+                          P_Value = numeric(),
+                          stringsAsFactors = FALSE)
+
+OrganList <- c(unique(noflatData$organ))
+for (Organ in OrganList){
+  print(Organ)
+  temp <- noflatData[noflatData$organ == Organ,]
+  comparisons <- combn(levels(factor(temp$Group)), 2, simplify = FALSE)
+  comparisons <- c(comparisons[1], comparisons[6])
+    for (comp in comparisons) {
+      group1 <- comp[1]
+      group2 <- comp[2]
+      
+      # Subset data for the two groups
+      temp_subset <- temp[temp$Group %in% c(group1, group2), ]
+      
+      if (length(unique(temp_subset[temp_subset$Group == group1,]$MElaS)) > 1 & length(temp_subset[temp_subset$Group == group1,]$MElaS) > 2) {
+        normalcy1 <- shapiro.test(temp_subset[temp_subset$Group == group1,]$MElaS)$p.value
+        } else {
+          normalcy1 <- 0 # Force Wilcoxon test if no variability
+        }
+      if (length(unique(temp_subset[temp_subset$Group == group2,]$MElaS)) > 1 & length(temp_subset[temp_subset$Group == group2,]$MElaS) > 2) {
+        normalcy2 <- shapiro.test(temp_subset[temp_subset$Group == group2,]$MElaS)$p.value
+        } else {
+          normalcy2 <- 0 # Force Wilcoxon test if no variability
+        }
+    
+      # Choose the appropriate test based on normality
+      if (normalcy1 < 0.05 | normalcy2 < 0.05) {
+        test_used <- "Wilcoxon"
+        plotTest <- "wilcox.test"
+        p_val <- wilcox.test(MElaS ~ Group, data = temp_subset)$p.value
+      } else {
+        test_used <- "T-test"
+        plotTest <- "t.test"
+        p_val <- t.test(MElaS ~ Group, data = temp_subset)$p.value
+      }
+      
+      
+      fc <- median(temp_subset[temp_subset$Group == group1,]$MElaS)/median(temp_subset[temp_subset$Group == group2,]$MElaS)
+      
+      # Store results in the data frame
+      p_values_df_2 <- rbind(p_values_df_2, data.frame(
+        Organ = Organ,
+        Group1 = group1,
+        Group2 = group2,
+        Test = test_used,
+        Fold_Change = fc,
+        P_Value = p_val
+      ))
+    }
+    
+}
+write.csv(p_values_df_2, "by_parasite_conc_pvalues.csv", row.names = FALSE)
+```
+#Proportion of non zeros vs zero MElaS scores
+
+```{r}
+#total percentage of nonzeros
+non_zero_count=sum(data$MElaS !=0)
+total_rows=nrow(data)
+proportion_non_zero <- (non_zero_count / total_rows) *100
+zero_count=total_rows-non_zero_count
+
+#percentage of nonzeros by organ 
+proportion_non_zero_by_organ <- data %>%
+  group_by(organ, parasite_species, infected_parasites) %>%
+  summarise(
+    non_zero_count_organ=sum(MElaS !=0),
+    total_rows_organ=n(),
+    proportion_non_zero_organ = (non_zero_count_organ / total_rows_organ) *100,
+    proportion_non_zero_organ =format(round(proportion_non_zero_organ, 3), nsmall = 3),
+    zero_count=total_rows_organ-non_zero_count_organ
+  )
+
+
+proportion_non_zero_by_organ$proportion_non_zero_organ=as.numeric(proportion_non_zero_by_organ$proportion_non_zero_organ)
+```
+
+#Percentage of Non-Zero MElas Scores per Organ Barplot including JR, CL, 100 and 1000
+
+```{r}
+proportion_non_zero_by_organ$strain_conc <- paste0(
+  proportion_non_zero_by_organ$parasite_species, "_",
+  proportion_non_zero_by_organ$infected_parasites
+)
+
+# Colors
+fill_colors <- c(
+  "CL_100"  = "lightblue", 
+  "CL_1000" = "blue3",
+  "JR_100"  = "firebrick1",
+  "JR_1000" = "red3"
+)
+
+ggplot(data = proportion_non_zero_by_organ,
+       aes(x = as.factor(organ),
+           y = proportion_non_zero_organ,
+           fill = strain_conc)) +
+  geom_col(position = position_dodge(width = 0.9)) + 
+  facet_wrap(vars(infected_parasites)) +
+  
+  scale_fill_manual(values = fill_colors,
+                    name = "Strain and Load") +
+  
+  ggtitle("Percentage of Non-Zero MElaS Scores") +
+  
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.8)),
+    axis.title.y = element_text(size = rel(1.8)),
+    legend.text = element_text(size = 13),
+    legend.title = element_text(size = rel(1.8)),
+    plot.title = element_text(size = 20)
+  ) +
+  labs(x = "Organ", y = "Percentage (%)")
+
+```
+
+#bar graphs comparing Percentage of Non-Zero MElas Scores by paraiste and load of each organ (bad)
+
+```{r}
+for (organ in unique(proportion_non_zero_by_organ$organ)) {
+  temp <- proportion_non_zero_by_organ[proportion_non_zero_by_organ$organ == organ,]
+  plot= ggplot(data=temp, aes(x=infected_parasites, y=proportion_non_zero_organ, fill=parasite_species)) +
+  geom_bar(position='dodge', stat="identity")+
+  geom_text(aes(label=proportion_non_zero_organ), vjust=3.3, size=2.5)+
+  theme_minimal() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle(paste0(organ, ": Percentage of Non-Zero MElas Scores")) + labs(x="infected_parasites", y="non-zero metabolite/total metabolite x 100")
+  print(plot)
+}
+
+```
+
+#Fisher's Test: comparing JR and CL at 100 and 1000 of each organ 
+Fold change CL/JR at 1000 and CL/JR at 100
+
+```{r}
+fisher_test_results_byJRvCL <- data.frame(
+  Organ = character(),
+  P_Value = numeric(),
+  Load = character(),
+  Parasite = character(),
+  FoldChange = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (Tissue in unique(proportion_non_zero_by_organ$organ)) {
+  proportion_non_zero_by_Organ=proportion_non_zero_by_organ %>%
+  group_by(parasite_species, infected_parasites, organ) %>%
+  filter(organ==Tissue)
+  
+  for (load in unique(proportion_non_zero_by_Organ$infected_parasites)) {
+    noflatDataframe_infected_parasites=proportion_non_zero_by_Organ %>%
+      filter(infected_parasites==load) %>%
+      select(non_zero_count_organ, zero_count, proportion_non_zero_organ)
+    print(noflatDataframe_infected_parasites)
+    foldchange = noflatDataframe_infected_parasites$proportion_non_zero_organ[1] / noflatDataframe_infected_parasites$proportion_non_zero_organ[2]
+    
+    table_counts <- noflatDataframe_infected_parasites %>%
+      group_by(parasite_species, infected_parasites) %>%
+      summarise(non_zero = sum(non_zero_count_organ),
+                zero = sum(zero_count)) %>%
+      ungroup()
+    
+    contingency <- as.matrix(table_counts[, c("non_zero", "zero")])
+    rownames(contingency) <- table_counts$parasite_species
+    print(contingency)
+    
+    fisher_result <- fisher.test(contingency, workspace=2000000000)
+    print(paste0("Fisher Test Comparing JR and CL at ", " Parasite Load in the ", organ))
+    print(fisher_result)
+    
+    fisher_test_results_byJRvCL <- rbind(
+      fisher_test_results_byJRvCL,
+      data.frame(Load = load, p_value = fisher_result$p.value, Organ = Tissue, parasite=paste(rownames(contingency), collapse="_vs_"), FoldChange=foldchange)
+    )
+
+  }
+}
+
+fisher_test_results_byJRvCL_sig<-fisher_test_results_byJRvCL %>%
+  filter(p_value<0.05)
+
+write.csv(fisher_test_results_byJRvCL, "fisher_test_results_byJRvCL.csv", row.names = FALSE)
+```
+
+```{r}
+ggplot(data=fisher_test_results_byJRvCL, aes(x=Organ, y=FoldChange, fill=Load)) +
+  geom_bar(position='dodge', stat="identity")+
+  theme_minimal() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle("Fold Change per Organ") + labs(x="Organ", y="Fold Change")
+```
+
+#Fisher's Test: comparing 100 and 1000 at JR and CL of each organ
+```{r}
+fisher_test_results_by100v1000 <- data.frame(
+  Organ = character(),
+  P_Value = numeric(),
+  Load = character(),
+  parasite = character(),
+  FoldChange = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (Tissue in unique(proportion_non_zero_by_organ$organ)) {
+  proportion_non_zero_by_Organ_100v1000=proportion_non_zero_by_organ %>%
+  filter(organ==Tissue) %>%  
+  group_by(parasite_species, infected_parasites, organ)
+  
+  for (Parasite in unique(proportion_non_zero_by_organ$parasite_species)) {
+    dataframe_Parasite=proportion_non_zero_by_Organ_100v1000 %>%
+      filter(parasite_species==Parasite) %>%
+      select(non_zero_count_organ, zero_count, infected_parasites, proportion_non_zero_organ)
+    #print(dataframe_Parasite)
+    foldchange = dataframe_Parasite$proportion_non_zero_organ[1] / dataframe_Parasite$proportion_non_zero_organ[2]
+    
+    table_counts <- dataframe_Parasite %>%
+      group_by(infected_parasites) %>%
+      summarise(non_zero = sum(non_zero_count_organ),
+                zero = sum(zero_count)) %>%
+      ungroup()
+    
+    contingency <- as.matrix(table_counts[, c("non_zero", "zero")])
+    rownames(contingency) <- table_counts$infected_parasites
+    print(contingency)
+    
+    fisher_result <- fisher.test(contingency, workspace=2000000000)
+    print(paste0("Fisher Test Comparing 100 and 1000 Parasite Load with in the ", Tissue))
+    print(fisher_result)
+    
+    fisher_test_results_by100v1000 <- rbind(
+      fisher_test_results_by100v1000,
+      data.frame(Load = paste(rownames(contingency), collapse="_vs_"), P_value = fisher_result$p.value, Organ = Tissue, parasite_species=Parasite, FoldChange=foldchange)
+    )
+
+  }
+}
+
+#fisher_test_results_by100v1000_sig<-fisher_test_results_by100v1000 %>%
+  #filter(P_value<0.05)
+
+write.csv(fisher_test_results_by100v1000, "fisher_test_results_by100v1000.csv", row.names = FALSE)
+```
+
+# median values
+
+```{r}
+median_by_organ_infected_parasites_parasite <- aggregate(MElaS ~ organ + parasite_species+infected_parasites, data = noflatData, FUN = median, na.action = na.omit)
+
+#write.csv(median_by_organ_infected_parasites_parasite,"median_by_organ_infected_parasites_parasite.csv")
+median_by_organ_infected_parasites_parasite$organ <- factor(median_by_organ_infected_parasites_parasite$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(data=median_by_organ_infected_parasites_parasite, aes(x = as.factor(organ), y = MElaS, fill = as.factor(parasite_species))) +
+  geom_col(position = "dodge") +
+  facet_wrap(vars(infected_parasites)) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle("Median MElas Scores per Organ") + labs(x="Organ", y="Median MElaS", fill="Parasite Species")
+
+median_by_organ_infected_parasites_parasite$strain_conc <- paste0(
+  median_by_organ_infected_parasites_parasite$parasite_species, "_",
+  median_by_organ_infected_parasites_parasite$infected_parasites
+)
+
+# Colors
+fill_colors <- c(
+  "CL_100"  = "lightblue", 
+  "CL_1000" = "blue3",
+  "JR_100"  = "firebrick1",
+  "JR_1000" = "red3"
+)
+
+noflatData$strain_conc <- paste0(
+  noflatData$parasite_species, "_",
+  noflatData$infected_parasites
+)
+ggplot(data=median_by_organ_infected_parasites_parasite, aes(x = as.factor(organ), y = MElaS, fill = strain_conc)) +
+  geom_col(position = "dodge") +
+  facet_wrap(vars(infected_parasites)) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle("Median MElas Scores") + labs(x="Organ", y="Median MElaS") +
+  
+  scale_fill_manual(values = fill_colors,
+                    name = "Strain and \nConcentration") +
+  
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.8)),
+    axis.title.y = element_text(size = rel(1.8)),
+    legend.text = element_text(size = 13),
+    legend.title = element_text(size = rel(1.8)),
+    plot.title = element_text(size = 20)
+  )
+
+median_by_organ_infected_parasites_parasite_1000 <- median_by_organ_infected_parasites_parasite %>%
+  filter(infected_parasites == "1000")
+
+ggplot(data=median_by_organ_infected_parasites_parasite_1000, aes(x = as.factor(organ), y = MElaS, fill = parasite_species)) +
+  geom_col(position = "dodge") + geom_signif(comparisons = list(c("Cecum", "Distal_Colon")),
+              map_signif_level = TRUE) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle("Median MElas Scores") + labs(x="Organ", y="Median MElaS") +
+  
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.8)),
+    axis.title.y = element_text(size = rel(1.8)),
+    legend.text = element_text(size = 13),
+    legend.title = element_text(size = rel(1.8)),
+    plot.title = element_text(size = 20)
+  )
+
+```
+
+#boxplots comparing MElaS in all organs 
+
+```{r}
+#JR 1000
+
+# do Kruskal Wallis test first (compare more than 3)
+kruskalwalisJR1000 <- kruskal.test(MElaS ~ organ, data = JR_1000_noflatData)
+kruskal.test(MElaS ~ organ, data = JR_1000_noflatData) #organs are significantly different p<2.2e-16
+
+dunntestJR1000 <- dunnTest(MElaS ~ organ,
+         data=JR_1000_noflatData,
+         method="bonferroni")
+dunn_df_JR1000 <- dunntestJR1000$res
+dunn_df_JR1000_sig<-dunn_df_JR1000 %>%
+  filter(P.adj<0.05)
+
+JR_1000_noflatData$organ <- factor(JR_1000_noflatData$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(JR_1000_noflatData, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +ggtitle("MElaS of All Organs JR 1000") +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25)) +  labs(x="Organ", y="MElaS") + scale_fill_viridis(discrete = TRUE, option="C") +
+    theme(legend.position="none")
+
+#JR 100
+kruskal.test(MElaS ~ organ, data = JR_100_noflatData) 
+dunntestJR100 <- dunnTest(MElaS ~ organ,
+         data=JR_100_noflatData,
+         method="bonferroni")
+dunn_df_JR100 <- dunntestJR100$res
+
+JR_100_noflatData$organ <- factor(JR_100_noflatData$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(JR_100_noflatData, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +ggtitle("MElaS of All Organs JR 100") +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25)) +  labs(x="Organ", y="MElaS") + scale_fill_viridis(discrete = TRUE, option="C") +
+    theme(legend.position="none")
+
+#CL 1000
+kruskal.test(MElaS ~ organ, data = CL_1000_noflatData) 
+dunntestCL1000 <- dunnTest(MElaS ~ organ,
+         data=CL_1000_noflatData,
+         method="bonferroni")
+dunn_df_CL1000 <- dunntestCL1000$res
+
+CL_1000_noflatData$organ <- factor(CL_1000_noflatData$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(CL_1000_noflatData, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +ggtitle("MElaS of All Organs CL 1000") +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25)) +  labs(x="Organ", y="MElaS") + scale_fill_viridis(discrete = TRUE, option="C") +
+    theme(legend.position="none")
+
+
+#CL 100
+kruskal.test(MElaS ~ organ, data = CL_100_noflatData) 
+dunntestCL100 <-dunnTest(MElaS ~ organ,
+         data=CL_100_noflatData,
+         method="bonferroni", list = TRUE)
+dunn_df_CL100 <- dunntestCL100$res
+
+CL_100_noflatData$organ <- factor(CL_100_noflatData$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(CL_100_noflatData, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +ggtitle("MElaS of All Organs CL 100") +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25)) +  labs(x="Organ", y="MElaS") + scale_fill_viridis(discrete = TRUE, option="C") +
+    theme(legend.position="none")
+
+
+#all
+noflatData$organ <- factor(noflatData$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(noflatData, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +ggtitle("MElaS of All Organs") +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25)) +  labs(x="Organ", y="MElaS") + scale_fill_viridis(discrete = TRUE, option="C") +
+    theme(legend.position="none")
+
+median_by_organ <- aggregate(MElaS ~ organ, data = noflatData, FUN = median, na.action = na.omit)
+
+ggplot(data=median_by_organ, aes(x = as.factor(organ), y = MElaS)) +
+  geom_col(position = "dodge") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle("Median MElas Scores per Organ") + labs(x="Organ", y="Median MElaS")
+
+#write.csv(dunn_df_JR1000, "dunn_df_JR1000.csv", row.names = FALSE)
+#write.csv(dunn_df_JR100, "dunn_df_JR100.csv", row.names = FALSE)
+#write.csv(dunn_df_CL1000, "dunn_df_CL1000.csv", row.names = FALSE)
+#write.csv(dunn_df_CL100, "dunn_df_CL100.csv", row.names = FALSE)
+
+```
+
+#comparing types
+```{r}
+dataWithMElaSTypesCount<-dataWithMElaSTypes %>%
+  group_by(organ, parasite_species, infected_parasites, Type) %>%
+  summarise(TypeCount = n())
+
+dataWithMElaSTypes$Type <- factor(dataWithMElaSTypes$Type, levels=c("up_down", "down_up", "flat_up", "flat_down", "up_flat", "down_flat", "up_up", "down_down", "flat"))
+
+noflatData$Type <- factor(noflatData$Type, levels=c("up_down", "down_up", "flat_up", "flat_down", "up_flat", "down_flat", "up_up", "down_down"))
+
+dataWithMElaSTypesCountnoflat<-filter(dataWithMElaSTypesCount, Type!="flat", )
+
+#counts of Types
+ggplot(data=dataWithMElaSTypes, aes(x = Type)) + geom_bar() + ggtitle("Count of Types Including Flat") + labs(x="Type", y="Type Count")
+
+dataWithMElaSTypesCountnoflat$Type <- factor(dataWithMElaSTypesCountnoflat$Type, levels=c("up_down", "down_up", "flat_up", "flat_down", "up_flat", "down_flat", "up_up", "down_down"))
+
+ggplot(noflatData, aes(x = Type)) + geom_bar() + ggtitle("Count of Types") + labs(x="Type", y="Type Count")
+
+#counts of type by parasite and concentration 
+for (organ in unique(dataWithMElaSTypesCountnoflat$organ)) {
+  temp <- dataWithMElaSTypesCountnoflat[dataWithMElaSTypesCountnoflat$organ == organ,]
+  plot<-ggplot(data=temp, aes(x = as.factor(Type), y = TypeCount, fill = as.factor(parasite_species))) +
+  geom_col(position = "dodge") +
+  facet_wrap(vars(infected_parasites)) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle(paste0("Count of Categories in ", organ)) + ylim(0, 700) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.8)),
+    axis.title.y = element_text(size = rel(1.8)),
+    legend.text = element_text(size = 13),
+    legend.title = element_text(size = rel(1.8)),
+    plot.title = element_text(size = 20)
+  ) +
+  labs(x = "Organ", y = "Count", fill="Parasite Strain")
+  print(plot)
+}
+
+dataWithMElaSTypesCountnoflat$strain_conc <- paste0(
+  dataWithMElaSTypesCountnoflat$parasite_species, "_",
+  dataWithMElaSTypesCountnoflat$infected_parasites
+)
+
+
+# Colors
+fill_colors <- c(
+  "CL_100"  = "lightblue", 
+  "CL_1000" = "blue3",
+  "JR_100"  = "firebrick1",
+  "JR_1000" = "red3"
+)
+
+for (organ in unique(dataWithMElaSTypesCountnoflat$organ)) {
+  temp <- dataWithMElaSTypesCountnoflat[dataWithMElaSTypesCountnoflat$organ == organ,]
+  plot<-ggplot(data=temp, aes(x = as.factor(Type), y = TypeCount, fill = strain_conc)) +
+  geom_col(position = "dodge") +
+  facet_wrap(vars(infected_parasites)) + scale_fill_manual(values = fill_colors,
+                    name = "Strain and Load")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle(paste0("Count of Categories in ", organ)) + ylim(0, 700) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.8)),
+    axis.title.y = element_text(size = rel(1.8)),
+    legend.text = element_text(size = 13),
+    legend.title = element_text(size = rel(1.8)),
+    plot.title = element_text(size = 20)
+  ) +
+  labs(x = "Organ", y = "Count")
+  print(plot)
+}
+#max MElaS by type barplot
+ggplot(data=noflatData, aes(x = as.factor(Type), y=MElaS))+geom_col(position = "dodge") + ggtitle("Max MElas per Type w/out flat") + labs(x="Type", y="MElaS")
+
+#max MElaS by type barplot with flat
+ggplot(data=dataWithMElaSTypes, aes(x = as.factor(Type), y=MElaS))+geom_col(position = "dodge") + ggtitle("Max MElas per Type w/ flat") + labs(x="Type", y="MElaS") #higher values of flat
+
+median_MElaS_per_Type <- noflatData %>%
+  group_by(Type) %>%
+  summarise(median_value = median(MElaS))
+
+median_MElaS_per_Type$Type <- factor(median_MElaS_per_Type$Type, levels=c("up_down", "down_up", "flat_up", "flat_down", "up_flat", "down_flat", "up_up", "down_down"))
+
+
+#median MElaS by type barplot
+ggplot(median_MElaS_per_Type, aes(x = Type, y = median_value)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Median MELaS by Category", x = "Category", y = "Median MElaS") +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=30))
+
+
+#IMPORTANT
+ggplot(dataWithMElaSTypes, aes(x=Type, y=MElaS))+ geom_boxplot() + labs(title = "Boxplot Comparing MelaS of Each Category", x = "Category", y = "MElaS") +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25))
+
+dataWithMElaSTypes %>%
+   group_by(Type) %>% 
+   summarise(
+      mean = mean(MElaS, na.rm=TRUE), 
+      sd=sd(MElaS), na.rm=TRUE,
+      max_score = max(MElaS, na.rm = TRUE),
+      min_score = min(MElaS, na.rm = TRUE))
+```
+
+
+
+# Molecular networking
+```{r}
+molecules<-read.csv("DiseaseToleranceGNPSResults.csv")
+
+#molecules_df <- molecules[- grep("N/A", molecules$superclass),]
+  
+# to compare all molecules types of organs
+merged_all_df <- merge(
+  molecules,
+  dataWithMElaSTypes,
+  by.x = "X.Scan.",
+  by.y = "extracted_ID",
+  all = FALSE   # inner join (only matching rows)
+)
+
+merged_all_df <- merged_all_df[, c( 'X.Scan.', 'superclass', 'class', 'ID', 'MElaS', 'logFC_3v0', 'logFC_12v3', 'FC_0w', 'FC_3w', 'FC_12w', 'FC_24w', 'organ', 'parasite_species', 'infected_parasites', 'Type', 'Type_24w')]
+
+for (Organ in unique(merged_all_df$organ)) {
+  temp<- merged_all_df %>%
+    filter(organ %in% c(Organ))
+  temp <- temp[- grep("N/A", temp$superclass),]
+  plot <- ggplot(temp, aes(x = superclass)) +
+  geom_bar() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5)) + labs(title = paste0("All ", Organ))
+  print(plot)
+  new_name <- paste0("df_", Organ)
+  assign(new_name, temp)
+}
+
+# to compare top metabolic molecules types of organs
+merged_all_top_df <- merge(
+  molecules,
+  all_top_df,
+  by.x = "X.Scan.",
+  by.y = "extracted_ID",
+  all = FALSE   # inner join (only matching rows)
+)
+
+merged_all_top_df <- merged_all_top_df[, c( 'X.Scan.', 'superclass', 'class', 'ID', 'MElaS', 'logFC_3v0', 'logFC_12v3', 'FC_0w', 'FC_3w', 'FC_12w', 'FC_24w', 'organ', 'parasite_species', 'infected_parasites', 'Type', 'Type_24w')]
+
+for (Organ in unique(merged_all_top_df$organ)) {
+  top_temp<- merged_all_top_df %>%
+    filter(organ %in% c(Organ))
+  top_temp <- top_temp[- grep("N/A", top_temp$superclass),]
+  plot1 <- ggplot(top_temp, aes(x = superclass)) +
+  geom_bar() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5)) + labs(title = paste0("Top ", Organ))
+  print(plot1)
+}
+
+merged_all_top_df_count<-merged_all_top_df %>%
+  group_by(organ, superclass) %>%
+  summarise(superclassCount = n())
+
+# to compare bottom metabolic molecules types of organs
+merged_all_bottom_df <- merge(
+  molecules,
+  all_bottom_df,
+  by.x = "X.Scan.",
+  by.y = "extracted_ID",
+  all = FALSE   # inner join (only matching rows)
+)
+
+merged_all_bottom_df <- merged_all_bottom_df[, c( 'X.Scan.', 'superclass', 'class', 'ID', 'MElaS', 'logFC_3v0', 'logFC_12v3', 'FC_0w', 'FC_3w', 'FC_12w', 'FC_24w', 'organ', 'parasite_species', 'infected_parasites', 'Type', 'Type_24w')]
+
+for (Organ in unique(merged_all_bottom_df$organ)) {
+  bottom_temp<- merged_all_bottom_df %>%
+    filter(organ %in% c(Organ))
+  bottom_temp <- bottom_temp[- grep("N/A", bottom_temp$superclass),]
+  plot2 <- ggplot(bottom_temp, aes(x = superclass)) +
+  geom_bar() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5)) + labs(title = paste0("Bottom ", Organ))
+  print(plot2)
+}
+merged_all_bottom_df_count<-merged_all_bottom_df %>%
+  group_by(organ, superclass) %>%
+  summarise(superclassCount = n())
+write.csv(merged_all_bottom_df_count, "merged_all_bottom_df_count.csv")
+write.csv(merged_all_top_df_count, "merged_all_top_df_count.csv")
+```
+
+# i dont know what this is...
+```{r}
+
+for (Organ in unique(all_bottom_MElaSJR1000_df$organ)) {
+  bottom_temp <- all_bottom_MElaSJR1000_df %>%
+    filter(organ %in% c(Organ)) %>%
+    mutate(extracted_ID = str_remove_all(ID, "X(\\d+).(\\d+)_(\\d+).(\\d+)_"))
+  all_bottom_MElaSJR1000_withmole <- filter(molecules_df, X.Scan. %in% bottom_temp$extracted_ID)
+  all_bottom_MElaSJR1000_withmole <- all_bottom_MElaSJR1000_withmole[, c("X.Scan.", "Compound_Name", "MassDiff", "superclass", "class")]
+  plot2 <- ggplot(all_bottom_MElaSJR1000_withmole, aes(x = superclass)) +
+  geom_bar() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5)) + labs(title = paste0(organ, ": for bottom JR 1000" ))
+  print(plot2)
+}
+
+
+for (Organ1 in unique(merged_df$organ)) {
+    temp <- merged_df[merged_df$organ == Organ1,] 
+    plot1 <- ggplot(temp, aes(x = superclass)) +
+    geom_bar() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5)) + labs(title = paste0(Organ1, ": for all" ))
+  print(plot1)
+}
+
+merged_df_cecum <- merged_df %>%
+  filter(organ=="Cecum" )
+
+ggplot(merged_df_cecum, aes(x = superclass)) +
+    geom_bar() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5))
+  
+merged_df_upperstom <- merged_df %>%
+  filter(organ=="Upper_Stomach" )
+
+ggplot(merged_df_upperstom, aes(x = superclass)) +
+    geom_bar() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5))
+  
+ggplot(all_top_MElaSJR1000_withmole, aes(x = superclass, y = count)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Counts of type of molecule", x = "class", y = "count") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5))
+
+all_bottom_MElaSJR1000_withmole<-filter(all_bottom_MElaSJR1000_withmole, npclassifier_class!="N/A", )
+
+all_bottom_MElaSJR1000_withmole<-all_bottom_MElaSJR1000_withmole %>%
+  group_by(npclassifier_class) %>%
+  mutate(count=n())
+  
+ggplot(all_bottom_MElaSJR1000_withmole, aes(x = npclassifier_class, y = count)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Counts of type of molecule", x = "class", y = "count") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5))
+
+```
+
+```{r}
+noflatData <- noflatData %>%
+  mutate(extracted_ID = str_remove_all(ID, "X(\\d+).(\\d+)_(\\d+).(\\d+)_"))
+
+noflatData_withmole <- filter(molecules, X.Scan. %in% noflatData$extracted_ID)
+noflatData_withmole <- noflatData_withmole[, c("X.Scan.", "Compound_Name", "MassDiff", "npclassifier_superclass", "npclassifier_class", "npclassifier_pathway")]
+
+noflatData_withmole<-filter(noflatData_withmole, npclassifier_class!="N/A", )
+noflatData_withmole<-filter(noflatData_withmole, npclassifier_superclass!="N/A", )
+
+noflatData_withmole<-noflatData_withmole %>%
+  group_by(npclassifier_class) %>%
+  mutate(class=n())
+
+noflatData_withmole<-noflatData_withmole %>%
+  group_by(npclassifier_superclass) %>%
+  mutate(superclass=n())
+
+ggplot(noflatData_withmole, aes(x = npclassifier_class, y = class)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Counts of type of molecule", x = "class", y = "count") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5))
+
+ggplot(noflatData_withmole, aes(x = npclassifier_superclass, y = class)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Counts of type of molecule", x = "superclass", y = "count") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=5))
+```
