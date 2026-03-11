@@ -1,21 +1,44 @@
-#Load the R Packages 
+---
+title: "R Notebook"
+output: html_notebook
+---
+# Compute MElaS
 
+After running CleanData_ComputeFC.ipynb, there will be files that will contain lnFC and p-values of the consecutive endpoints of interest. In this case we have, newratio_3v0.txt, newratio_12v3.txt and newratio_24v12.txt because we want to calculate MElaS with 3 and 12 weeks and MElaS values for 12 and 24 weeks. 
 
-library("matrixStats") # version 0.58.0
+This code will also make a single csv file containing MElaS values, FC at 0w, 3w, 12w, lnFC at 3v0, 12v3 and 24v12 for all organs and conditions for analysis.
 
-library("data.table") # version 1.14.3
+## Install and Load Packages
 
-library(dplyr)
+```{r}
+#install.packages("matrixStats")
+library(matrixStats) # version 0.58.0
 
+#install.packages("data.table")
+library(data.table) # version 1.14.3
+
+#install.packages("dplyr")
+library(dplyr) # version 1.1.4
+
+#install.packages("stringr")
+library(stringr) # version 1.5.1
+
+```
+
+## Compute MElaS 
+
+This code will use a formula and calculate MElaS for each metabolites for each organ under different conditions. MElaS values will be added to a csv called All_MElaS_Data.csv file inclduing FC at 0w, 3w, 12w, lnFC at 3v0, 12v3 and 24v12 of all organs. 
+
+```{r}
 #Initialize variable
 
-#Tissue name (Add all organs you want to compare)
+#Organ name (Add all organs you want to compare)
 TissTitle=c("Cecum","Duodenum","Distal_Colon", "Esophagus", "Heart_A", "Heart_B", "Heart_C", "Heart_D", "Ileum", "Jejunum", "Proximal_Colon", "Upper_Stomach")
 
 #Comparison list (FC between two consecutive endpoints)
 comg=c("newratio_3v0","newratio_12v3")
 
-main_dir <- "~/MElaS11.21" #search for main directory
+main_dir <- "~/MElaSRun" #search for main directory where nested folders with FC were located
 
 nested_dir <- list.dirs(main_dir, recursive = FALSE) #search nested directories
 
@@ -60,11 +83,8 @@ for (path in nested_dir) {
     tlog2FC.Ratio=rowMins(as.matrix(tAbslog2FC.Mat))/rowMaxs(as.matrix(tAbslog2FC.Mat))
     tlog2FC.Ratio[is.na(tlog2FC.Ratio)]=0
     
-    #Calculate the weight for FDR (statistical significance)
-    #tFDR.FN=log10(get(tFN.name)[tgid,"adj.P.Val"])
+    #Calculate the weight for statistical significance
     tFDR.RF=log10(get(tRF.name)[tgid,"adj.P.Val"])
-    #tFDR.FN[tFDR.FN >= log10(0.05)]=tFDR.FN[tFDR.FN >= log10(0.05)]/(log10(0.05))
-    #tFDR.FN[tFDR.FN < log10(0.05)]=1
     tFDR.RF[tFDR.RF >= log10(0.05)]=tFDR.RF[tFDR.RF >= log10(0.05)]/(log10(0.05))
     tFDR.RF[tFDR.RF < log10(0.05)]=1
     
@@ -79,27 +99,29 @@ for (path in nested_dir) {
     
     
   }
-  #Add LogFC of 3v0 and 12v3 to MElaS file
+  #Add LogFC of 3v0, 12v3 and 24v12 to MElaS file per organ
   for(tissi in TissTitle){
     melas_df <- read.table(paste0(tissi, "/", tissi, "_MElaS.txt"), header = TRUE, sep = "\t", stringsAsFactors = FALSE)
     logfc_3v0_df <- read.table(paste0(tissi, "/", "newratio_3v0.txt"), header = TRUE, sep = "\t", stringsAsFactors = FALSE)
     logfc_12v3_df <- read.table(paste0(tissi, "/", "newratio_12v3.txt"), header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+    logfc_24v12_df <- read.table(paste0(tissi, "/", "newratio_24v12.txt"), header = TRUE, sep = "\t", stringsAsFactors = FALSE)
     
     
     combined_df <- melas_df %>%
       left_join(logfc_3v0_df %>% select(ID, logFC_3v0=FC), by = "ID") %>%
-      left_join(logfc_12v3_df %>% select(ID, logFC_12v3=FC), by = "ID")
+      left_join(logfc_12v3_df %>% select(ID, logFC_12v3=FC), by = "ID") %>%
+      left_join(logfc_24v12_df %>% select(ID, logFC_24v12=FC), by = "ID")
     
     
     write.table(combined_df, paste0(tissi, "/", tissi, "_MElaS.txt"), sep = "\t", row.names = FALSE, quote = FALSE)
     
     
-    #Add LogFC of 0w, 3w and 12w to MElaS file
+    #Add LogFC of 0w, 3w, 12w and 24w to MElaS file per organ
     melas_df <- read.table(paste0(tissi, "/", tissi, "_MElaS.txt"), header = TRUE, sep = "\t", stringsAsFactors = FALSE)
-    logfc_0w_df <- read.csv(paste0(tissi, "/", "newratio_0w.csv"), header = TRUE, stringsAsFactors = FALSE)
-    logfc_3w_df <- read.csv(paste0(tissi, "/", "newratio_3w.csv"), header = TRUE, stringsAsFactors = FALSE)
-    logfc_12w_df <- read.csv(paste0(tissi, "/", "newratio_12w.csv"), header = TRUE, stringsAsFactors = FALSE)
-    logfc_24w_df <- read.csv(paste0(tissi, "/", "newratio_24w.csv"), header = TRUE, stringsAsFactors = FALSE)
+    logfc_0w_df <- read.csv(paste0(tissi, "/", "ratio_0w.csv"), header = TRUE, stringsAsFactors = FALSE)
+    logfc_3w_df <- read.csv(paste0(tissi, "/", "ratio_3w.csv"), header = TRUE, stringsAsFactors = FALSE)
+    logfc_12w_df <- read.csv(paste0(tissi, "/", "ratio_12w.csv"), header = TRUE, stringsAsFactors = FALSE)
+    logfc_24w_df <- read.csv(paste0(tissi, "/", "ratio_24w.csv"), header = TRUE, stringsAsFactors = FALSE)
     
     
     combined_df <- melas_df %>%
@@ -115,7 +137,7 @@ for (path in nested_dir) {
   
 }
 
-#combines all MElaS dataframes into one file that includes all parasite species and infected parasites
+#combines all MElaS dataframes into one file that includes all organs, parasite species and infected parasites
 datalist = list()
 for (path in nested_dir) {
   print(paste("Processing directory:", path))
@@ -125,13 +147,12 @@ for (path in nested_dir) {
     df <- read.table(file_path, header = TRUE, sep = "\t")
     
     df$organ <- organ
-    #df$parasite_species<-substr(path, start = 32, stop = 33)
-    df$parasite_species <- str_extract(path, "(?<=/MElaS11.21/MElaS).*?(?=0_100)")
+    df$parasite_species <- str_extract(path, "(?<=/MElaSRun/MElaS).*?(?=0_100)") #change to the main directory you had your files
     df$infected_parasites<-sub(".*_", "", path)
-    #df$time<-time
     datalist[[length(datalist) + 1]] <- df
   }
 }
 
 combined_df<-do.call(rbind, datalist)
-write.csv(combined_df, "All_DATA_2.3.csv", row.names = FALSE)
+write.csv(combined_df, "All_MElaS_Data.csv", row.names = FALSE)
+```
