@@ -31,14 +31,14 @@ The latter three files will be required to calculate MElaS and contain lnFC and 
 - Reads in newratio_3v0.txt, newratio_12v3.txt and newratio_24v12.txt for each organ
 - Calculate Elastic Score between 3 and 12 weeks and between 12 and 24 weeks
 - Produces MElaS.txt file for each organ containing MElaS of each metabolite
-- will also make a single csv file called All_MElaS_Data.csv containing MElaS values, FC at 0w, 3w, 12w, lnFC at 3v0, 12v3 and 24v12 for all organs and conditions for analysis
+- will also make a single csv file called All_MElaS_Data.csv containing MElaS values, FC at 0w, 3w, 12w, 24w lnFC at 3v0, 12v3 and 24v12 for all organs and conditions for analysis
   
 ### Paper and GitHub referenced in this code:
 Zhou, Q., Yu, L., Cook, J.R., Qiang, L. & Sun, L. 2023, Cell Metabolism, 35, 1661-167.e6, doi: 10.1016/j.cmet.2023.08.001.
 https://github.com/zhouqz/GElaS
 
 ## MElaSAnalysis.Rmd:
-- Reads in All_MElaS_Data.csv for each organ
+- Reads in All_MElaS_Data_0v3v12.csv for each organ
 - Produce categories or temporal patterns of each metabolite
 - Identify most and least elastic metabolites per organ
 - Chemical annotation of all metabolites and most and least elastic metabolites
