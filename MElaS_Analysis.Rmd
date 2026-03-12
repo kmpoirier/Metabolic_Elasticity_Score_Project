@@ -6,9 +6,12 @@ editor_options:
 ---
 # Analysis of MElaS
 
+## Import Packages
+
 ```{r}
 library(dplyr) # version 1.1.4
 library(ggplot2) # version 3.5.2
+library(ggpubr) # version 0.6.0
 library(tidyr) # version 1.3.1
 library(FSA) # version 0.10.0
 library(purrr) # version 1.0.4
@@ -19,8 +22,8 @@ library(viridis) # version 0.6.5
 ## Load data
 
 ```{r}
-# data of sample and metabolite's MElaS
-data<-read.csv("ALL_DATA.csv")
+# data of every sample and metabolite's MElaS
+data<-read.csv("All_MElaS_Data_0v3v12.csv")
 
 data$infected_parasites=as.factor(data$infected_parasites)
 data$organ=as.factor(data$organ)
@@ -68,24 +71,14 @@ noflatData<-filter(dataWithMElaSTypes, Type!="flat", )
 ## Comparison of categories
 
 ```{r}
-# General Stats
-dataWithMElaSTypes %>%
-   group_by(Type) %>% 
-   summarise(
-      mean = mean(MElaS, na.rm=TRUE), 
-      sd=sd(MElaS), na.rm=TRUE,
-      max_score = max(MElaS, na.rm = TRUE),
-      min_score = min(MElaS, na.rm = TRUE))
-
 # Figure 3: Comparison of MElaS of each category within all metabolites (all metabolites included)
+dataWithMElaSTypes$Type <- factor(dataWithMElaSTypes$Type, levels=c("up_down", "down_up", "flat_up", "flat_down", "up_flat", "down_flat", "up_up", "down_down", "flat"))
 boxplot_cat <- ggplot(dataWithMElaSTypes, aes(x=Type, y=MElaS))+ geom_boxplot() + labs(title = "Boxplot Comparing MelaS of Each Category", x = "Category", y = "MElaS") +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(title=element_blank())
 print(boxplot_cat)
 plotname <- "thesis_pres_images/defense_images/boxplot_cat_MElaSValues.png"
 ggsave(plotname, dpi = 300)
 
 # Figure 4A: Bar plot illustrating distribution of each category within metabolites.Metabolites considered flat were included in this figure
-dataWithMElaSTypes$Type <- factor(dataWithMElaSTypes$Type, levels=c("up_down", "down_up", "flat_up", "flat_down", "up_flat", "down_flat", "up_up", "down_down", "flat"))
-
 barplot_cat_flat <- ggplot(data=dataWithMElaSTypes, aes(x = Type)) + geom_bar() + labs(x="Category", y="Count") +theme_bw() +theme(axis.text.y = element_text(size=13)) + theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(title=element_blank())
 print(barplot_cat_flat)
 plotname <- "thesis_pres_images/defense_images/barplot_cat_count_flat.png"
@@ -99,43 +92,6 @@ barplot_cat_noflat <- ggplot(noflatData, aes(x = Type)) + geom_bar() + labs(x="C
 print(barplot_cat_noflat)
 plotname <- "thesis_pres_images/defense_images/barplot_cat_count_noflat.png"
 ggsave(plotname, dpi = 300)
-```
-
-#!!!!!work in progress for 24w analysis
-
-```{r}
-all_top_MElaSJR1000_df<-filter(all_top_MElaSJR1000_df, organ=="Heart_D")
-for (organ in unique(all_top_MElaSJR1000_df$organ)) {
-  temp <- all_top_MElaSJR1000_df[all_top_MElaSJR1000_df$organ == organ,]
-  
-  long_noflatData_with_time_top <- pivot_longer(temp, cols = c(FC_0w, FC_3w, FC_12w, FC_24w), 
-                          names_to = "Time", values_to = "LogFC")
-  long_noflatData_with_time_top$Time <- factor(long_noflatData_with_time_top$Time, levels=c("FC_0w", "FC_3w", "FC_12w", 'FC_24w'))
-  
-  for (metabolite in unique(long_noflatData_with_time_top$ID)) {
-    temp<-long_noflatData_with_time_top[long_noflatData_with_time_top$ID==metabolite, ]
-    p=ggplot(temp, aes(x = Time, y = LogFC, group=1)) + geom_line() + geom_point() + labs(title = paste0("Top MElas: ", metabolite, " FC Between Endpoints in ", organ), x = "Endpoint (weeks)", y = "FC")+ theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(2.8))) + theme(axis.title.x = element_text(size = rel(1.8))) +theme(axis.title.x = element_blank(), axis.text.x = element_blank())
-  print(p)
-
-  }
-}
-```
-#!!!!work in progress for 24w analysis
-```{r}
-all_bottom_MElaSJR1000_df<-filter(all_bottom_MElaSJR1000_df, organ=="Heart_D")
-for (organ in unique(all_bottom_MElaSJR1000_df$organ)) {
-  temp <- all_bottom_MElaSJR1000_df[all_bottom_MElaSJR1000_df$organ == organ,]
-  
-  long_noflatData_with_time_bottom <- pivot_longer(temp, cols = c(FC_0w, FC_3w, FC_12w, FC_24w), 
-                          names_to = "Time", values_to = "LogFC")
-  long_noflatData_with_time_bottom$Time <- factor(long_noflatData_with_time_bottom$Time, levels=c("FC_0w", "FC_3w", "FC_12w", "FC_24w"))
-  
-  for (metabolite in unique(long_noflatData_with_time_bottom$ID)) {
-    temp<-long_noflatData_with_time_bottom[long_noflatData_with_time_bottom$ID==metabolite, ]
-    p=ggplot(temp, aes(x = Time, y = LogFC, group=1)) + geom_line() + geom_point() + labs(title = paste0("Bottom MElas: ", metabolite, " FC Between Endpoints in ", organ), x = "Endpoint Rations", y = "FC")+ theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(2.8))) + theme(axis.title.x = element_text(size = rel(1.8))) +theme(axis.title.x = element_blank(), axis.text.x = element_blank())
-  print(p)
-}
-}
 ```
 
 ## Chemical annotation of all metabolites and most and least elastic metabolites
@@ -271,8 +227,8 @@ for (metabolite in top_metabolite) {
   labs(title=paste0("Peak Area of Top MElaS ", metabolite), x = "Endpoint (weeks)", y = "Peak Area", fill="Infection Status") + geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
                   alpha = 0.5, size = 0.9) +theme_bw() + scale_fill_manual(values = c("infected" = "red", "uninfected" = "grey")) +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(legend.text=element_text(size=13))+  theme(legend.title=element_text(size=rel(1.8)))
   print(plot)
-  plotname <- paste0("images2/top_metabolites_plots/", metabolite, "boxplot.png")
-  ggsave(plotname, dpi = 300)
+  #plotname <- paste0("images2/top_metabolites_plots/", metabolite, "boxplot.png")
+  #ggsave(plotname, dpi = 300)
   
 }
 ```
@@ -305,8 +261,8 @@ for (metabolite in bottom_metabolite) {
   labs(title=paste0("Peak Area of Bottom MElaS ", metabolite), x = "Endpoint (weeks)", y = "Peak Area", fill="Infection Status") + geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
                   alpha = 0.5, size = 0.9) +theme_bw() + scale_fill_manual(values = c("infected" = "red", "uninfected" = "grey")) +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(legend.text=element_text(size=13))+  theme(legend.title=element_text(size=rel(1.8)))
   print(plot)
-  plotname <- paste0("images2/bottom_metabolites_plots/", metabolite, "boxplot_bottom.png")
-  ggsave(plotname, dpi = 300)
+  #plotname <- paste0("images2/bottom_metabolites_plots/", metabolite, "boxplot_bottom.png")
+  #ggsave(plotname, dpi = 300)
 }
 ```
 
@@ -325,8 +281,8 @@ for (organ in unique(all_top_MElaSJR1000_df$organ)) {
     temp<-long_noflatData_with_time_top[long_noflatData_with_time_top$ID==metabolite, ]
     p=ggplot(temp, aes(x = Time, y = LogFC, group=1)) + geom_line() + geom_point() + labs(title = paste0("Top MElas: ", metabolite, " FC Between Endpoints in ", organ), x = "Endpoint (weeks)", y = "FC")+ theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(2.8))) + theme(axis.title.x = element_text(size = rel(1.8))) +theme(axis.title.x = element_blank(), axis.text.x = element_blank(), title= element_blank())
   print(p)
-  plotname2 <- paste0("images2/top_metabolites_plots/", metabolite, "lineplot.png")
-  ggsave(plotname2, dpi = 300) 
+  #plotname2 <- paste0("images2/top_metabolites_plots/", metabolite, "lineplot.png")
+  #ggsave(plotname2, dpi = 300) 
 
   }
 }
@@ -347,8 +303,8 @@ for (organ in unique(all_bottom_MElaSJR1000_df$organ)) {
     temp<-long_noflatData_with_time_bottom[long_noflatData_with_time_bottom$ID==metabolite, ]
     p=ggplot(temp, aes(x = Time, y = LogFC, group=1)) + geom_line() + geom_point() + labs(title = paste0("Bottom MElas: ", metabolite, " FC Between Endpoints in ", organ), x = "Endpoint Rations", y = "FC")+ theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(2.8))) + theme(axis.title.x = element_text(size = rel(1.8))) +theme(axis.title.x = element_blank(), axis.text.x = element_blank(), title= element_blank())
   print(p)
-  plotname2 <- paste0("images2/", metabolite, "lineplot_bottom.png")
-  ggsave(plotname2, dpi = 300)
+  #plotname2 <- paste0("images2/", metabolite, "lineplot_bottom.png")
+  #ggsave(plotname2, dpi = 300)
   }
 }
 
@@ -1124,7 +1080,7 @@ proportion_non_zero <- (non_zero_count / total_rows) *100
 zero_count=total_rows-non_zero_count
 
 #percentage of nonzeros by organ 
-proportion_non_zero_by_organ <- noflatData %>%
+proportion_non_zero_by_organ <- dataWithMElaSTypes %>%
   group_by(organ, parasite_species, infected_parasites) %>%
   summarise(
     non_zero_count_organ=sum(MElaS !=0),
@@ -1320,92 +1276,81 @@ write.csv(fisher_test_results_by100v1000,
 # Differences in non-zero MElaS values by sampling site
 
 ```{r}
-median_by_group <- noflatData %>%
-  group_by(organ, parasite_species, infected_parasites) %>%
-  summarise(median_value = median(MElaS))
 #JR 1000
-JR_1000_noflatData_0<- JR_1000_noflatData %>%
-  filter(MElaS !=0)
 
 #Kruskal Wallis test to compare significance among organs
-kruskalwalisJR1000 <- kruskal.test(MElaS ~ organ, data = JR_1000_noflatData_0)
-kruskal.test(MElaS ~ organ, data = JR_1000_noflatData_0) #organs are significantly different p<2.2e-16
+kruskalwalisJR1000 <- kruskal.test(MElaS ~ organ, data = JR_1000_noflatData)
+kruskal.test(MElaS ~ organ, data = JR_1000_noflatData) #organs are significantly different p<2.2e-16
 
  #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
 dunntestJR1000 <- dunnTest(MElaS ~ organ,
-         data=JR_1000_noflatData_0,
+         data=JR_1000_noflatData,
          method="bh")
 dunn_df_JR1000 <- dunntestJR1000$res
 
-JR_1000_noflatData_0$organ <- factor(JR_1000_noflatData_0$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+JR_1000_noflatData$organ <- factor(JR_1000_noflatData$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
 
 #boxplots by organ
-boxplot_allorgans_JR1000 <- ggplot(JR_1000_noflatData_0, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) +  labs(x="Organ", y="MElaS") + theme(legend.position="none")
+boxplot_allorgans_JR1000 <- ggplot(JR_1000_noflatData, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) +  labs(x="Organ", y="MElaS") + theme(legend.position="none")
 print(boxplot_allorgans_JR1000)
-plotname <- "thesis_pres_images/defense_images/boxplot_allorgans_JR1000.png"
-ggsave(plotname, dpi = 300)
+#plotname <- "thesis_pres_images/defense_images/boxplot_allorgans_JR1000.png"
+#ggsave(plotname, dpi = 300)
 
 
 #JR 100
-JR_100_noflatData_0<- JR_100_noflatData %>%
-  filter(MElaS !=0)
 #Kruskal Wallis test to compare significance among organs
-kruskal.test(MElaS ~ organ, data = JR_100_noflatData_0) 
+kruskal.test(MElaS ~ organ, data = JR_100_noflatData) 
 
  #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
 dunntestJR100 <- dunnTest(MElaS ~ organ,
-         data=JR_100_noflatData_0,
+         data=JR_100_noflatData,
          method="bh")
 dunn_df_JR100 <- dunntestJR100$res
 
-JR_100_noflatData_0$organ <- factor(JR_100_noflatData_0$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+JR_100_noflatData$organ <- factor(JR_100_noflatData$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
 
 #boxplots by organ
-boxplot_allorgans_JR100 <- ggplot(JR_100_noflatData_0, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25)) +  labs(x="Organ", y="MElaS") + theme(legend.position="none")
+boxplot_allorgans_JR100 <- ggplot(JR_100_noflatData, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25)) +  labs(x="Organ", y="MElaS") + theme(legend.position="none")
 print(boxplot_allorgans_JR100)
-plotname <- "thesis_pres_images/defense_images/boxplot_allorgans_JR100.png"
-ggsave(plotname, dpi = 300)
+#plotname <- "thesis_pres_images/defense_images/boxplot_allorgans_JR100.png"
+#ggsave(plotname, dpi = 300)
 
 #CL 1000
-CL_1000_noflatData_0<- CL_1000_noflatData %>%
-  filter(MElaS !=0)
 #Kruskal Wallis test to compare significance among organs
-kruskal.test(MElaS ~ organ, data = CL_1000_noflatData_0) 
+kruskal.test(MElaS ~ organ, data = CL_1000_noflatData) 
 
  #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
 dunntestCL1000 <- dunnTest(MElaS ~ organ,
-         data=CL_1000_noflatData_0,
+         data=CL_1000_noflatData,
          method="bh")
 dunn_df_CL1000 <- dunntestCL1000$res
 
-CL_1000_noflatData_0$organ <- factor(CL_1000_noflatData_0$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+CL_1000_noflatData$organ <- factor(CL_1000_noflatData$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
 
 #boxplots by organ
-boxplot_allorgans_CL1000 <- ggplot(CL_1000_noflatData_0, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25)) +  labs(x="Organ", y="MElaS") + theme(legend.position="none")
+boxplot_allorgans_CL1000 <- ggplot(CL_1000_noflatData, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25)) +  labs(x="Organ", y="MElaS") + theme(legend.position="none")
 print(boxplot_allorgans_CL1000)
-plotname <- "thesis_pres_images/defense_images/boxplot_allorgans_CL1000.png"
-ggsave(plotname, dpi = 300)
+#plotname <- "thesis_pres_images/defense_images/boxplot_allorgans_CL1000.png"
+#ggsave(plotname, dpi = 300)
 
 
 #CL 100
-CL_100_noflatData_0<- CL_100_noflatData %>%
-  filter(MElaS !=0)
 #Kruskal Wallis test to compare significance among organs
-kruskal.test(MElaS ~ organ, data = CL_100_noflatData_0) 
+kruskal.test(MElaS ~ organ, data = CL_100_noflatData) 
 
  #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
 dunntestCL100 <-dunnTest(MElaS ~ organ,
-         data=CL_100_noflatData_0,
+         data=CL_100_noflatData,
          method="bh", list = TRUE)
 dunn_df_CL100 <- dunntestCL100$res
 
-CL_100_noflatData_0$organ <- factor(CL_100_noflatData_0$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+CL_100_noflatData$organ <- factor(CL_100_noflatData$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
 
 #boxplots by organ
-boxplot_allorgans_CL100 <- ggplot(CL_100_noflatData_0, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25)) +  labs(x="Organ", y="MElaS") + theme(legend.position="none")
+boxplot_allorgans_CL100 <- ggplot(CL_100_noflatData, aes(x=organ, y=MElaS, fill=organ))+ geom_boxplot() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(plot.title=element_text(size=25)) +  labs(x="Organ", y="MElaS") + theme(legend.position="none")
 print(boxplot_allorgans_CL100)
-plotname <- "thesis_pres_images/defense_images/boxplot_allorgans_CL100.png"
-ggsave(plotname, dpi = 300)
+#plotname <- "thesis_pres_images/defense_images/boxplot_allorgans_CL100.png"
+#ggsave(plotname, dpi = 300)
 
 #Save full results
 write.csv(dunn_df_JR1000, "dunn_df_JR1000.csv", row.names = FALSE)
@@ -1474,51 +1419,4 @@ for (organ in unique(dataWithMElaSTypesCountnoflat$organ)) {
   print(plot)
 }
 
-```
-
-# for 24 weeks analysis (not done yet)
-
-```{r}
-dataWithMElaSTypes <- dataWithMElaSTypes %>%
-  mutate(
-    Type_24w = case_when(FC_24w > FC_12w ~ "up", FC_24w < FC_12w ~ "down", .default = "flat"))
-
-dataWithMElaSTypes$New_Type <- paste0(dataWithMElaSTypes$Type, "_", dataWithMElaSTypes$Type_24w)      
-dataWithMElaSTypes <- dataWithMElaSTypes %>%
-  mutate(
-    Elascity = case_when(New_Type == "down_up_flat" | New_Type == "down_up_up" | New_Type == "up_down_down" | New_Type == "up_down_flat" ~ "early_elastic", New_Type == "down_down_up" | New_Type == "flat_down_up" | New_Type == "flat_up_down" | New_Type == "up_up_down" ~ "delayed_elastic", New_Type == "down_up_down" | New_Type == "up_down_up" ~ "multi_elastic", .default = "none"))
-
-dataWithMElaSTypes_newcount<-dataWithMElaSTypes %>%
-  group_by(New_Type) %>%
-  summarise(New_Type_Count = n())
-
-dataWithMElaSTypes_count<-dataWithMElaSTypes %>%
-  group_by(Type) %>%
-  summarise(Count = n())
-
-dataWithMElaSTypes_elas<-dataWithMElaSTypes %>%
-  group_by(Elascity) %>%
-  summarise(Count = n())
-
-#includes all categories
-dataWithMElaSTypes$New_Type <- factor(dataWithMElaSTypes$New_Type, levels=c("down_up_flat", "down_up_up", "up_down_down", "up_down_flat", "down_down_up","flat_down_up", "flat_up_down", "up_up_down", "down_up_down", "up_down_up", "down_flat_up", "up_up_up", "flat_down_down", "flat_up_flat", "flat_down", "flat_up", "up_flat_down", "flat_up_up", "up_flat_up", "down_flat_down",  "down_down_down", "flat_flat"))
-
-plot <- ggplot(dataWithMElaSTypes, aes(x = New_Type)) + geom_bar() + labs(x="New Categories", y="Count") +theme_bw() +theme(axis.text.y = element_text(size=13)) + theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(title=element_blank())
-print(plot)
-
-dataWithMElaSTypes_noflat<-filter(dataWithMElaSTypes, New_Type!="flat_flat", )
-
-plot2 <- ggplot(dataWithMElaSTypes_noflat, aes(x = New_Type)) + geom_bar() + labs(x="New Categories", y="Count") +theme_bw() +theme(axis.text.y = element_text(size=13)) + theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(title=element_blank())
-print(plot2)
-
-#includes just elastic vs non elastic categories
-dataWithMElaSTypes$Elascity <- factor(dataWithMElaSTypes$Elascity, levels=c("none", "early_elastic", "delayed_elastic", "multi_elastic"))
-
-plot3 <- ggplot(dataWithMElaSTypes, aes(x = Elascity)) + geom_bar() + labs(x="Elascity", y="Count") +theme_bw() +theme(axis.text.y = element_text(size=13)) + theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(title=element_blank())
-print(plot3)
-
-dataWithMElaSTypes_noflat<-filter(dataWithMElaSTypes, Elascity!="none", )
-
-plot2 <- ggplot(dataWithMElaSTypes_noflat, aes(x = Elascity)) + geom_bar() + labs(x="Elascity", y="Count") +theme_bw() +theme(axis.text.y = element_text(size=13)) + theme(axis.text.x = element_text(size=13)) + theme(axis.title.y = element_text(size = rel(1.8))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=13)) + theme(title=element_blank())
-print(plot2)
 ```

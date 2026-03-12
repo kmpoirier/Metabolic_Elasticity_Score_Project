@@ -134,7 +134,7 @@ for (path in nested_dir) {
 }
 ```
 
-#combines all MElaS dataframes into one file that includes all organs, parasite species and infected parasites
+## Combine all MElaS dataframes into one file that includes all organs, parasite species and infected parasites
 
 ```{r}
 datalist = list()
@@ -155,9 +155,9 @@ for (path in nested_dir) {
 combined_df<-do.call(rbind, datalist)
 write.csv(combined_df, "All_MElaS_Data_0v3v12.csv", row.names = FALSE)
 ```
-## Compute MElaS between 3, 12 and 24 weeks (Optional, use only if you to calculate at different times)
+## Compute MElaS between 3, 12 and 24 weeks (Optional, use only if you want to calculate at more than 2 times)
 
-This code will use a formula and calculate MElaS at 3, 12 and 24 weeks for each metabolites for each organ under different conditions. MElaS values will be added to a csv called All_MElaS_Data.csv file including FC at 3w, 12w and 24w lnFC at 12v3 and 24v3 of all organs. 
+This code will use a formula and calculate MElaS at 3, 12 and 24 weeks for each metabolites for each organ under different conditions. MElaS values will be added to a csv called All_MElaS_Data.csv file including FC at 0w, 3w, 12w and 24w lnFC at 12v3 and 24v3 of all organs. 
 
 ```{r}
 #Initialize variable
@@ -244,14 +244,16 @@ for (path in nested_dir) {
     write.table(combined_df_2, paste0(tissi, "/", tissi, "_MElaS_3v12v24.txt"), sep = "\t", row.names = FALSE, quote = FALSE)
     
     
-    #Add LogFC of 3w, 12w and 24w to MElaS file per organ
+    #Add LogFC of 0w, 3w, 12w and 24w to MElaS file per organ
     melas_df_2 <- read.table(paste0(tissi, "/", tissi, "_MElaS_3v12v24.txt"), header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+    logfc_0w_df <- read.csv(paste0(tissi, "/", "ratio_0w.csv"), header = TRUE, stringsAsFactors = FALSE)
     logfc_3w_df <- read.csv(paste0(tissi, "/", "ratio_3w.csv"), header = TRUE, stringsAsFactors = FALSE)
     logfc_12w_df <- read.csv(paste0(tissi, "/", "ratio_12w.csv"), header = TRUE, stringsAsFactors = FALSE)
     logfc_24w_df <- read.csv(paste0(tissi, "/", "ratio_24w.csv"), header = TRUE, stringsAsFactors = FALSE)
     
     
     combined_df_2 <- melas_df_2 %>%
+      left_join(logfc_0w_df %>% select(ID, FC_0w=FC), by = "ID") %>%
       left_join(logfc_3w_df %>% select(ID, FC_3w=FC), by = "ID") %>%
       left_join(logfc_12w_df %>% select(ID, FC_12w=FC), by = "ID") %>%
       left_join(logfc_24w_df %>% select(ID, FC_24w=FC), by = "ID")
@@ -263,7 +265,7 @@ for (path in nested_dir) {
   
 }
 ```
-#combines all MElaS dataframes into one file that includes all organs, parasite species and infected parasites
+## Combine all MElaS dataframes into one file that includes all organs, parasite species and infected parasites
 
 ```{r}
 datalist = list()
