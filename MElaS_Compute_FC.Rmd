@@ -1,0 +1,409 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+To compute MElaS values, you will need a feature table and metadata merged.The metadata must include at least two different endpoints (A, B and C: image example below). This code has an example of 3 and 24 weeks. Change these values to fit your data set. To compute elasticity for each metabolite, natural log fold changes and p-values between consecutive endpoints are calculated. The median peak area values for each metabolite of all infected and uninfected samples at each 3 and 24 weeks for each organ are computed. A value of 5.06 x 10⁻⁷, the minimum value in the dataset, needs to be added to each median value to prevent a zero denominator and log error. Fold change (FC) between median infected over median uninfected at each endpoint is then calculated. To calculate elasticity scores for this example, an initial endpoint of 0 weeks is required so FC at 0 weeks is set to a value of 1. Natural log fold changes between consecutive times are then determined for each metabolite. Lastly, p-values using Wilcox test to compare the differences of infected individuals between 3 versus 24 weeks for each metabolite are computed. In this example, lnFC between 3 and 0 weeks were computed and lnFC between 24 weeks were computed. 
+
+In conclusion, you will need:
+lnFC_BvA
+lnFC_CvB
+adj.P.Val_CvB
+per each metabolite and condition in a csv file. After computing FC, you can run Compute_MElaS.Rmd. An example of the .csv is provided in this folder.
+
+```{r, echo=FALSE, out.width="50%", fig.align="center", fig.cap="Your Caption"}
+knitr::include_graphics("~/Desktop/Metabolic_Elascity_Score_Project/MElaS_explained.png")
+```
+
+## Install and load packages
+
+```{r}
+library(dplyr) # version 1.1.4
+library(tidyr) # version 1.3.1
+library(rstatix)
+```
+
+# Import feature table and metadata merged
+
+```{r}
+data <- read.csv("DisTol_mergeddata.csv")
+```
+
+# Clean and remove unreliable data and calculate median values for each feature by organ, endpoint, species and inoculum
+
+```{r}
+#clean and remove unreliable data and calculate median values for each feature by organ, endpoint, species and inoculum
+med_data <- data %>%
+  filter(ATTRIBUTE_groupset == "Sample", ATTRIBUTE_infected_parasites != "10000", ATTRIBUTE_organ != "Lower_Stomach_2", ATTRIBUTE_organ != "Lower_Stomach" ) %>%
+  group_by(ATTRIBUTE_organ, ATTRIBUTE_endpoint, ATTRIBUTE_infected_parasites, ATTRIBUTE_parasite_species) %>%
+  summarise(across(6:last_col(), ~ median(.x, na.rm = TRUE)))
+
+
+pivot_med_data <- pivot_longer(
+  med_data,
+  cols = starts_with("X"),
+  names_to = "Feature",
+  values_to = "Peak_Area",
+  values_drop_na = FALSE
+)
+
+```
+
+#JR 1000: Calculate FC of cosequetive endpoints and p-values
+
+```{r}
+#Calculate FC on infected/uninfected for each feature by organ and endpoint
+pivot_med_data_1000_JR <- pivot_med_data %>%
+  filter(ATTRIBUTE_infected_parasites !="100", ATTRIBUTE_parasite_species !="CL_Luc") %>%
+  group_by(Feature, ATTRIBUTE_organ, ATTRIBUTE_endpoint) %>%
+  mutate(Condition = case_when(ATTRIBUTE_infected_parasites =="0" ~ "uninfected", ATTRIBUTE_infected_parasites =="1000" ~ "infected" )) %>%
+  summarise(FC = (Peak_Area[Condition == "infected"]+0.0000005) / (Peak_Area[Condition == "uninfected"]+0.0000005))
+
+new_rows <- pivot_med_data_1000_JR %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+     distinct(ATTRIBUTE_organ,
+           Feature) %>% 
+  mutate(
+    ATTRIBUTE_endpoint = "0w",
+    FC = 1
+  )
+
+pivot_med_data_1000_JR <- bind_rows(pivot_med_data_1000_JR, new_rows)
+
+#calculate FC of consecutive endpoints  (e.g 3w/0w, 24w/3w, 12w/0w, 24w/12w)
+pivot_med_data_1000_JR_FC <- pivot_med_data_1000_JR %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+  mutate(logFC_3v0 = log(FC[ATTRIBUTE_endpoint == "3w"] / FC[ATTRIBUTE_endpoint == "0w"]),
+            logFC_24v3 = log(FC[ATTRIBUTE_endpoint == "24w"] / FC[ATTRIBUTE_endpoint == "3w"]),
+            logFC_12v0 = log(FC[ATTRIBUTE_endpoint == "12w"] / FC[ATTRIBUTE_endpoint == "0w"]),
+            logFC_24v12 = log(FC[ATTRIBUTE_endpoint == "24w"] / FC[ATTRIBUTE_endpoint == "12w"]))
+
+#calculate p-values of consecutive endpoints (e.g  24w/3w and 24w/12w)
+pivot_data <- data %>%
+  filter(ATTRIBUTE_groupset == "Sample", ATTRIBUTE_infected_parasites != "10000", ATTRIBUTE_organ != "Lower_Stomach_2", ATTRIBUTE_organ != "Lower_Stomach" ) 
+  
+pivot_data <- pivot_longer(
+  pivot_data,
+  cols = starts_with("X"),
+  names_to = "Feature",
+  values_to = "Peak_Area",
+  values_drop_na = FALSE
+)
+
+pivot_data_pvalue_1000_JR <- pivot_data %>%
+  filter(
+    ATTRIBUTE_infected_parasites == "1000",
+    ATTRIBUTE_parasite_species == "JR_Luc"
+  ) %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+  summarise(
+    adj.P.Val_24v3 = wilcox.test(
+      Peak_Area[ATTRIBUTE_endpoint %in% c("3w", "24w")] ~
+        ATTRIBUTE_endpoint[ATTRIBUTE_endpoint %in% c("3w", "24w")]
+    )$p.value,
+
+    adj.P.Val_24v12 = wilcox.test(
+      Peak_Area[ATTRIBUTE_endpoint %in% c("12w", "24w")] ~
+        ATTRIBUTE_endpoint[ATTRIBUTE_endpoint %in% c("12w", "24w")]
+    )$p.value,
+
+    .groups = "drop"
+  )
+  
+```
+
+#JR 100: Calculate FC of cosequetive endpoints and p-values
+
+```{r}
+#Calculate FC on infected/uninfected for each feature by organ and endpoint
+pivot_med_data_100_JR <- pivot_med_data %>%
+  filter(ATTRIBUTE_infected_parasites !="1000", ATTRIBUTE_parasite_species !="CL_Luc") %>%
+  group_by(Feature, ATTRIBUTE_organ, ATTRIBUTE_endpoint) %>%
+  mutate(Condition = case_when(ATTRIBUTE_infected_parasites =="0" ~ "uninfected", ATTRIBUTE_infected_parasites =="100" ~ "infected" )) %>%
+  summarise(FC = (Peak_Area[Condition == "infected"]+0.0000005) / (Peak_Area[Condition == "uninfected"]+0.0000005))
+
+new_rows <- pivot_med_data_100_JR %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+     distinct(ATTRIBUTE_organ,
+           Feature) %>% 
+  mutate(
+    ATTRIBUTE_endpoint = "0w",
+    FC = 1
+  )
+
+pivot_med_data_100_JR <- bind_rows(pivot_med_data_100_JR, new_rows)
+
+#calculate FC of consecutive endpoints  (e.g 3w/0w, 24w/3w, 12w/0w, 24w/12w)
+pivot_med_data_100_JR_FC <- pivot_med_data_100_JR %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+  mutate(logFC_3v0 = log(FC[ATTRIBUTE_endpoint == "3w"] / FC[ATTRIBUTE_endpoint == "0w"]),
+            logFC_24v3 = log(FC[ATTRIBUTE_endpoint == "24w"] / FC[ATTRIBUTE_endpoint == "3w"]),
+            logFC_12v0 = log(FC[ATTRIBUTE_endpoint == "12w"] / FC[ATTRIBUTE_endpoint == "0w"]),
+            logFC_24v12 = log(FC[ATTRIBUTE_endpoint == "24w"] / FC[ATTRIBUTE_endpoint == "12w"]))
+
+#calculate p-values of consecutive endpoints (e.g  24w/3w and 24w/12w)
+pivot_data <- data %>%
+  filter(ATTRIBUTE_groupset == "Sample", ATTRIBUTE_infected_parasites != "10000", ATTRIBUTE_organ != "Lower_Stomach_2", ATTRIBUTE_organ != "Lower_Stomach" ) 
+  
+pivot_data <- pivot_longer(
+  pivot_data,
+  cols = starts_with("X"),
+  names_to = "Feature",
+  values_to = "Peak_Area",
+  values_drop_na = FALSE
+)
+
+pivot_data_pvalue_100_JR <- pivot_data %>%
+  filter(
+    ATTRIBUTE_infected_parasites == "100",
+    ATTRIBUTE_parasite_species == "JR_Luc"
+  ) %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+  summarise(
+    adj.P.Val_24v3 = wilcox.test(
+      Peak_Area[ATTRIBUTE_endpoint %in% c("3w", "24w")] ~
+        ATTRIBUTE_endpoint[ATTRIBUTE_endpoint %in% c("3w", "24w")]
+    )$p.value,
+
+    adj.P.Val_24v12 = wilcox.test(
+      Peak_Area[ATTRIBUTE_endpoint %in% c("12w", "24w")] ~
+        ATTRIBUTE_endpoint[ATTRIBUTE_endpoint %in% c("12w", "24w")]
+    )$p.value,
+
+    .groups = "drop"
+  )
+  
+```
+
+#CL 1000
+
+```{r}
+#Calculate FC on infected/uninfected for each feature by organ and endpoint
+pivot_med_data_1000_CL <- pivot_med_data %>%
+  filter(ATTRIBUTE_infected_parasites !="100", ATTRIBUTE_parasite_species !="JR_Luc") %>%
+  group_by(Feature, ATTRIBUTE_organ, ATTRIBUTE_endpoint) %>%
+  mutate(Condition = case_when(ATTRIBUTE_infected_parasites =="0" ~ "uninfected", ATTRIBUTE_infected_parasites =="1000" ~ "infected" )) %>%
+  summarise(FC = (Peak_Area[Condition == "infected"]+0.0000005) / (Peak_Area[Condition == "uninfected"]+0.0000005))
+
+new_rows <- pivot_med_data_1000_CL %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+     distinct(ATTRIBUTE_organ,
+           Feature) %>% 
+  mutate(
+    ATTRIBUTE_endpoint = "0w",
+    FC = 1
+  )
+
+pivot_med_data_1000_CL <- bind_rows(pivot_med_data_1000_CL, new_rows)
+
+#calculate FC of consecutive endpoints  (e.g 3w/0w, 24w/3w, 12w/0w, 24w/12w)
+pivot_med_data_1000_CL_FC <- pivot_med_data_1000_CL %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+  mutate(logFC_3v0 = log(FC[ATTRIBUTE_endpoint == "3w"] / FC[ATTRIBUTE_endpoint == "0w"]),
+            logFC_24v3 = log(FC[ATTRIBUTE_endpoint == "24w"] / FC[ATTRIBUTE_endpoint == "3w"]),
+            logFC_12v0 = log(FC[ATTRIBUTE_endpoint == "12w"] / FC[ATTRIBUTE_endpoint == "0w"]),
+            logFC_24v12 = log(FC[ATTRIBUTE_endpoint == "24w"] / FC[ATTRIBUTE_endpoint == "12w"]))
+
+#calculate p-values of consecutive endpoints (e.g  24w/3w and 24w/12w)
+pivot_data <- data %>%
+  filter(ATTRIBUTE_groupset == "Sample", ATTRIBUTE_infected_parasites != "10000", ATTRIBUTE_organ != "Lower_Stomach_2", ATTRIBUTE_organ != "Lower_Stomach" ) 
+  
+pivot_data <- pivot_longer(
+  pivot_data,
+  cols = starts_with("X"),
+  names_to = "Feature",
+  values_to = "Peak_Area",
+  values_drop_na = FALSE
+)
+
+pivot_data_pvalue_1000_CL <- pivot_data %>%
+  filter(
+    ATTRIBUTE_infected_parasites == "1000",
+    ATTRIBUTE_parasite_species == "CL_Luc"
+  ) %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+  summarise(
+    adj.P.Val_24v3 = wilcox.test(
+      Peak_Area[ATTRIBUTE_endpoint %in% c("3w", "24w")] ~
+        ATTRIBUTE_endpoint[ATTRIBUTE_endpoint %in% c("3w", "24w")]
+    )$p.value,
+
+    adj.P.Val_24v12 = wilcox.test(
+      Peak_Area[ATTRIBUTE_endpoint %in% c("12w", "24w")] ~
+        ATTRIBUTE_endpoint[ATTRIBUTE_endpoint %in% c("12w", "24w")]
+    )$p.value,
+
+    .groups = "drop"
+  )
+  
+```
+
+
+#CL 100
+
+```{r}
+#Calculate FC on infected/uninfected for each feature by organ and endpoint
+pivot_med_data_100_CL <- pivot_med_data %>%
+  filter(ATTRIBUTE_infected_parasites !="1000", ATTRIBUTE_parasite_species !="JR_Luc") %>%
+  group_by(Feature, ATTRIBUTE_organ, ATTRIBUTE_endpoint) %>%
+  mutate(Condition = case_when(ATTRIBUTE_infected_parasites =="0" ~ "uninfected", ATTRIBUTE_infected_parasites =="100" ~ "infected" )) %>%
+  summarise(FC = (Peak_Area[Condition == "infected"]+0.0000005) / (Peak_Area[Condition == "uninfected"]+0.0000005))
+
+new_rows <- pivot_med_data_100_CL %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+     distinct(ATTRIBUTE_organ,
+           Feature) %>% 
+  mutate(
+    ATTRIBUTE_endpoint = "0w",
+    FC = 1
+  )
+
+pivot_med_data_100_CL <- bind_rows(pivot_med_data_100_CL, new_rows)
+
+#calculate FC of consecutive endpoints  (e.g 3w/0w, 24w/3w, 12w/0w, 24w/12w)
+pivot_med_data_100_CL_FC <- pivot_med_data_100_CL %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+  mutate(logFC_3v0 = log(FC[ATTRIBUTE_endpoint == "3w"] / FC[ATTRIBUTE_endpoint == "0w"]),
+            logFC_24v3 = log(FC[ATTRIBUTE_endpoint == "24w"] / FC[ATTRIBUTE_endpoint == "3w"]),
+            logFC_12v0 = log(FC[ATTRIBUTE_endpoint == "12w"] / FC[ATTRIBUTE_endpoint == "0w"]),
+            logFC_24v12 = log(FC[ATTRIBUTE_endpoint == "24w"] / FC[ATTRIBUTE_endpoint == "12w"]))
+
+#calculate p-values of consecutive endpoints (e.g  24w/3w and 24w/12w)
+pivot_data <- data %>%
+  filter(ATTRIBUTE_groupset == "Sample", ATTRIBUTE_infected_parasites != "10000", ATTRIBUTE_organ != "Lower_Stomach_2", ATTRIBUTE_organ != "Lower_Stomach" ) 
+  
+pivot_data <- pivot_longer(
+  pivot_data,
+  cols = starts_with("X"),
+  names_to = "Feature",
+  values_to = "Peak_Area",
+  values_drop_na = FALSE
+)
+
+pivot_data_pvalue_100_CL <- pivot_data %>%
+  filter(
+    ATTRIBUTE_infected_parasites == "100",
+    ATTRIBUTE_parasite_species == "CL_Luc"
+  ) %>%
+  group_by(Feature, ATTRIBUTE_organ) %>%
+  summarise(
+    adj.P.Val_24v3 = wilcox.test(
+      Peak_Area[ATTRIBUTE_endpoint %in% c("3w", "24w")] ~
+        ATTRIBUTE_endpoint[ATTRIBUTE_endpoint %in% c("3w", "24w")]
+    )$p.value,
+
+    adj.P.Val_24v12 = wilcox.test(
+      Peak_Area[ATTRIBUTE_endpoint %in% c("12w", "24w")] ~
+        ATTRIBUTE_endpoint[ATTRIBUTE_endpoint %in% c("12w", "24w")]
+    )$p.value,
+
+    .groups = "drop"
+  )
+  
+```
+
+# rearrange dataset and merge al values together
+
+```{r}
+# JR 1000
+pivot_med_data_1000_JR_FC<- pivot_med_data_1000_JR_FC %>% # make columns for FC
+  pivot_wider(
+    names_from = ATTRIBUTE_endpoint, 
+    values_from = FC
+  )
+
+pivot_med_data_1000_JR_FC <- pivot_med_data_1000_JR_FC %>% # rename FC columns
+  rename("FC_0w" = "0w") %>%
+  rename("FC_3w" = "3w") %>%
+  rename("FC_12w" = "12w") %>%
+  rename("FC_24w" = "24w")
+
+pivot_med_data_1000_JR_FC_all <-  pivot_med_data_1000_JR_FC %>% # combine FC values and p-values together
+  left_join(
+    pivot_data_pvalue_1000_JR %>%
+      select(Feature, ATTRIBUTE_organ, adj.P.Val_24v3, adj.P.Val_24v12),
+    by = c("Feature", "ATTRIBUTE_organ")
+  )
+
+pivot_med_data_1000_JR_FC_all$parasite_species <- "JR" # make species column
+pivot_med_data_1000_JR_FC_all$infected_parasites <- "1000" # make inoculum column
+
+# JR 100
+
+pivot_med_data_100_JR_FC<- pivot_med_data_100_JR_FC %>% # make columns for FC
+  pivot_wider(
+    names_from = ATTRIBUTE_endpoint, 
+    values_from = FC
+  )
+
+pivot_med_data_100_JR_FC <- pivot_med_data_100_JR_FC %>% # rename FC columns
+  rename("FC_0w" = "0w") %>%
+  rename("FC_3w" = "3w") %>%
+  rename("FC_12w" = "12w") %>%
+  rename("FC_24w" = "24w")
+
+pivot_med_data_100_JR_FC_all <-  pivot_med_data_100_JR_FC %>% # combine FC values and p-values together
+  left_join(
+    pivot_data_pvalue_100_JR %>%
+      select(Feature, ATTRIBUTE_organ, adj.P.Val_24v3, adj.P.Val_24v12),
+    by = c("Feature", "ATTRIBUTE_organ")
+  )
+
+pivot_med_data_100_JR_FC_all$parasite_species <- "JR" # make species column
+pivot_med_data_100_JR_FC_all$infected_parasites <- "100" # make inoculum column
+
+# CL 1000
+pivot_med_data_1000_CL_FC<- pivot_med_data_1000_CL_FC %>% # make columns for FC
+  pivot_wider(
+    names_from = ATTRIBUTE_endpoint, 
+    values_from = FC
+  )
+
+pivot_med_data_1000_CL_FC <- pivot_med_data_1000_CL_FC %>% # rename FC columns
+  rename("FC_0w" = "0w") %>%
+  rename("FC_3w" = "3w") %>%
+  rename("FC_12w" = "12w") %>%
+  rename("FC_24w" = "24w")
+
+pivot_med_data_1000_CL_FC_all <-  pivot_med_data_1000_CL_FC %>% # combine FC values and p-values together
+  left_join(
+    pivot_data_pvalue_1000_JR %>%
+      select(Feature, ATTRIBUTE_organ, adj.P.Val_24v3, adj.P.Val_24v12),
+    by = c("Feature", "ATTRIBUTE_organ")
+  )
+
+pivot_med_data_1000_CL_FC_all$parasite_species <- "CL" # make species column
+pivot_med_data_1000_CL_FC_all$infected_parasites <- "1000" # make inoculum column
+
+# CL 100
+pivot_med_data_100_CL_FC<- pivot_med_data_100_CL_FC %>% # make columns for FC
+  pivot_wider(
+    names_from = ATTRIBUTE_endpoint, 
+    values_from = FC
+  )
+
+pivot_med_data_100_CL_FC <- pivot_med_data_100_CL_FC %>% # rename FC columns
+  rename("FC_0w" = "0w") %>%
+  rename("FC_3w" = "3w") %>%
+  rename("FC_12w" = "12w") %>%
+  rename("FC_24w" = "24w")
+
+pivot_med_data_100_CL_FC_all <-  pivot_med_data_100_CL_FC %>% # combine FC values and p-values together
+  left_join(
+    pivot_data_pvalue_100_CL %>%
+      select(Feature, ATTRIBUTE_organ, adj.P.Val_24v3, adj.P.Val_24v12),
+    by = c("Feature", "ATTRIBUTE_organ")
+  )
+
+pivot_med_data_100_CL_FC_all$parasite_species <- "CL" # make species column
+pivot_med_data_100_CL_FC_all$infected_parasites <- "100" # make inoculum column
+
+
+#combine all dataframes together
+combined_all <- bind_rows(pivot_med_data_1000_JR_FC_all, pivot_med_data_100_JR_FC_all, pivot_med_data_1000_CL_FC_all, pivot_med_data_100_CL_FC_all)
+
+combined_all[is.na(combined_all)] <- 1
+
+write.csv(combined_all, "MElaS_FC_pvalues.csv", row.names = FALSE) #save to .csv
+```
+
+

@@ -1,0 +1,1529 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+# Install and load packages
+
+```{r}
+library(dplyr) # version 1.1.4
+library(ggplot2) # version 3.5.2
+library(ggpubr) # version 0.6.0
+library(tidyr) # version 1.3.1
+library(FSA) # version 0.10.0
+library(purrr) # version 1.0.4
+library(stringr) # version 1.5.1
+library(viridis) # version 0.6.5
+library(tidyverse)
+library(UpSetR)
+library(ComplexUpset)
+```
+
+# Import data
+
+```{r}
+#import MElaS
+data<-read.csv("MElaS_Values.csv")
+
+#set categories as factors
+data$infected_parasites=as.factor(data$infected_parasites)
+data$organ=as.factor(data$organ)
+data$parasite_species=as.factor(data$parasite_species)
+
+# data from GNPS
+molecules<-read.csv("DiseaseToleranceGNPSResults.csv")
+
+# data from original feature table
+metadata<-read.csv("DisTol_mergeddata.csv")
+metadata<-na.omit(metadata)
+ATTRIBUTE_infected_parasites<-as.factor(metadata$ATTRIBUTE_infected_parasites) 
+ATTRIBUTE_endpoint<-as.factor(metadata$ATTRIBUTE_endpoint)
+
+metadata<-filter(metadata, ATTRIBUTE_infected_parasites!='10000', ) # remove 10000
+```
+
+# Create patterns of early, late, early and late, inelastic and unchanged
+
+```{r}
+dataWithMElaSTypes <- data %>%
+  mutate(
+    Type = case_when(
+      (MElaS_0v3v24 >= 8.60136153) & (MElaS_0v12v24 >= 7.604416279) ~ "early_late_elastic",
+      MElaS_0v3v24 >= 8.60136153  ~"early_elastic",
+        MElaS_0v12v24 >= 7.604416279  ~"late_elastic",
+      (FC_3w <= 1.2 & FC_3w >=0.8) & (FC_12w <=1.2 & FC_12w >=0.8) & (FC_24w <=1.2 & FC_24w >=0.8) ~"unchanged",
+      TRUE ~ "inelastic"
+      
+    )
+  ) 
+
+# Make a new dataset that removes all metabolites that were categorized "unchanged"
+noflatData<-filter(dataWithMElaSTypes, Type!="unchanged", )
+
+```
+
+## Chemical annotation of all metabolites using GNPS data
+
+```{r}
+# Merge GNPS data with MElaS data to identify annotated molecules
+dataWithMElaSTypes <- dataWithMElaSTypes %>%
+  mutate(extracted_ID = str_remove_all(ID, "X(\\d+).(\\d+)_(\\d+).(\\d+)_"))
+
+merged_all_df <- merge(
+  molecules,
+  dataWithMElaSTypes,
+  by.x = "X.Scan.",
+  by.y = "extracted_ID",
+  all = FALSE 
+)
+
+merged_all_df <- merged_all_df[, c( 'ID', 'MassDiff', 'Compound_Name', 'superclass', 'class', 'MElaS_0v3v24', 'MElaS_0v12v24','organ', 'parasite_species', 'infected_parasites')]
+
+write.csv(merged_all_df, "Annotated_MElaS_df.csv", row.names = FALSE) #export file of all features with MElaS and chemical annotation
+
+# Merge GNPS data with MElaS data to identify annotated molecules not classified as "unchanged"
+noflatData <- noflatData %>%
+  mutate(extracted_ID = str_remove_all(ID, "X(\\d+).(\\d+)_(\\d+).(\\d+)_"))
+
+merged_all_df_noflat <- merge(
+  molecules,
+  noflatData,
+  by.x = "X.Scan.",
+  by.y = "extracted_ID",
+  all = FALSE 
+)
+
+merged_all_df_noflat <- merged_all_df_noflat[, c( 'ID', 'MassDiff', 'Compound_Name', 'superclass', 'class', 'MElaS_0v3v24', 'MElaS_0v12v24','organ', 'parasite_species', 'infected_parasites', "Type")]
+
+write.csv(merged_all_df_noflat, "Annotated_MElaS_df_flatremoved.csv", row.names = FALSE) #export file of features not considered "unchanged" with MElaS and chemical annotation
+
+```
+
+```{r}
+# Comparison of Early MElaS of each category within all metabolites (all metabolites included) wont need!!!!
+dataWithMElaSTypes$Type <- factor(dataWithMElaSTypes$Type, levels=c("early_elastic", "late_elastic", "early_late_elastic", "inelastic", "unchanged"))
+boxplot_cat <- ggplot(dataWithMElaSTypes, aes(x=Type, y=MElaS_0v3v24))+ geom_boxplot() + labs(title = "Boxplot Comparing MelaS of Each Category", x = "Pattern", y = "MElaS (Early)") +theme_bw() +theme(axis.text.y = element_text(size=15))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=20)) + theme(axis.title.y = element_text(size = rel(2.2))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(title=element_blank(), axis.title.x = element_blank())
+print(boxplot_cat)
+
+# Comparison of Late MElaS of each category within all metabolites (all metabolites included) wont need !!!!
+dataWithMElaSTypes$Type <- factor(dataWithMElaSTypes$Type, levels=c("early_elastic", "late_elastic", "early_late_elastic", "inelastic", "unchanged"))
+boxplot_cat <- ggplot(dataWithMElaSTypes, aes(x=Type, y=MElaS_0v12v24))+ geom_boxplot() + labs(title = "Boxplot Comparing MelaS of Each Category", x = "Pattern", y = "MElaS (Late)") +theme_bw() +theme(axis.text.y = element_text(size=15))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=20)) + theme(axis.title.y = element_text(size = rel(2.2))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(title=element_blank(), axis.title.x = element_blank())
+print(boxplot_cat)
+
+
+
+# Bar plot illustrating distribution of each category within metabolites. Metabolites considered flat were included in this figure
+barplot_cat_flat <- ggplot(data=dataWithMElaSTypes, aes(x = Type)) + geom_bar() + labs(x="Pattern", y="Count") +theme_bw() +theme(axis.text.y = element_text(size=15)) + theme(axis.text.x = element_text(size=15)) + theme(axis.title.y = element_text(size = rel(2.2))) + theme(axis.title.x = element_text(size = rel(1.8))) + theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=20)) + theme(title=element_blank(), axis.title.x = element_blank())
+print(barplot_cat_flat)
+
+# Bar plot illustrating distribution of each category within all metabolites. Metabolites considered unchanged were removed from this data set
+#dataWithMElaSTypesnoflat<-filter(dataWithMElaSTypes, Type!="unchanged", )
+noflatData$Type <- factor(noflatData$Type, levels=c("early_elastic", "late_elastic", "early_late_elastic", "inelastic"))
+
+barplot_cat_noflat <- ggplot(noflatData, aes(x = Type)) + geom_bar() + labs(x="Pattern", y="Count") +theme_bw() +theme(axis.text.y = element_text(size=15)) + theme(axis.text.x = element_text(size=15)) + theme(axis.title.y = element_text(size = rel(2.2))) + theme(axis.title.x = element_text(size = rel(2.2))) + theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=20)) + theme(title=element_blank(), axis.title.x = element_blank())
+print(barplot_cat_noflat)
+
+```
+
+```{r}
+# data frames for each strain and concentration combination
+JR_1000_noflatData<- noflatData %>%
+  filter(parasite_species=="JR", infected_parasites=="1000")
+
+JR_100_noflatData<- noflatData %>%
+  filter(parasite_species=="JR", infected_parasites=="100")
+
+CL_1000_noflatData<- noflatData %>%
+  filter(parasite_species=="CL", infected_parasites=="1000")
+
+CL_100_noflatData<- noflatData %>%
+  filter(parasite_species=="CL", infected_parasites=="100")
+```
+
+# Differences in non-zero MElaS values by sampling site
+## Run a Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test by early and late MElaS and by stain/inoculation
+
+```{r}
+#JR 1000
+#early elasticity 
+#Kruskal Wallis test to compare significance among organs
+JR_1000_noflatData_early<- JR_1000_noflatData %>%
+  filter(MElaS_0v3v24 !=0) %>%
+  mutate(log_MElaS_early = log10(MElaS_0v3v24))
+
+kruskal.test(log_MElaS_early ~ organ, data = JR_1000_noflatData_early) #organs are significantly different p<2.2e-16
+
+ #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
+dunntestJR1000_early <- dunnTest(log_MElaS_early ~ organ,
+         data=JR_1000_noflatData_early,
+         method="bh")
+dunn_df_JR1000_early <- dunntestJR1000_early$res
+
+dunn_df_JR1000_early <- dunn_df_JR1000_early %>%
+  separate_wider_delim(Comparison, delim = " - ", names = c("Tissue1", "Tissue2"))
+
+tissues <- unique(c(dunn_df_JR1000_early$Tissue1, dunn_df_JR1000_early$Tissue2))
+
+pairwise_matrix <- matrix(
+  NA,
+  nrow = length(tissues),
+  ncol = length(tissues),
+  dimnames = list(tissues, tissues)
+)
+
+for(i in 1:nrow(dunn_df_JR1000_early)) {
+  
+  t1 <- dunn_df_JR1000_early$Tissue1[i]
+  t2 <- dunn_df_JR1000_early$Tissue2[i]
+  p  <- dunn_df_JR1000_early$P.adj[i]
+  
+  pairwise_matrix[t1, t2] <- p
+  pairwise_matrix[t2, t1] <- p   # mirror value
+}
+
+diag(pairwise_matrix) <- 1
+pairwise_table <- as.data.frame(pairwise_matrix)
+
+write.csv(pairwise_matrix, "dunn_df_JR1000_early.csv", row.names = TRUE) #export dunn's test results
+
+#Boxplots of Log-scaled MElaS values comparisons of early MElaS values for each organ
+colors <- c(
+  "Duodenum"= "#8DD3C7", "Heart_A"= "#FFFFB3", "Heart_B" = "#BEBADA", "Heart_C" = "#FB8072",
+  "Heart_D"= "#80B1D3","Esophagus"= "#FDB462", "Upper_Stomach"= "#B3DE69", "Illeum"= "#FCCDE5",
+  "Cecum"= "#D9D9D9", "Jejunum"="#BC80BD", "Distal_Colon"= "#CCEBC5", "Proximal_Colon"= "#FFED6F"
+)
+boxplot_allorgans_JR1000_early <- ggplot(JR_1000_noflatData_early, aes(x = reorder(organ, -log_MElaS_early, FUN = median), y = log_MElaS_early, fill=organ))+ geom_boxplot() +scale_fill_manual(values = colors) +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=15)) + theme(axis.title.y = element_text(size = rel(1.7))) + theme(axis.title.x = element_text(size = rel(1.7))) +  labs(x="Organ", y=expression(Log [10]~MElaS~(Early))) + theme(legend.position="none")
+
+print(boxplot_allorgans_JR1000_early)
+
+
+#JR 1000
+#late
+#Kruskal Wallis test to compare significance among organs
+JR_1000_noflatData_late<- JR_1000_noflatData %>%
+  filter(MElaS_0v12v24 !=0) %>%
+  mutate(log_MElaS_late = log10(MElaS_0v12v24))
+
+kruskal.test(log_MElaS_late ~ organ, data = JR_1000_noflatData_late) #organs are significantly different p<2.2e-16
+
+ #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
+dunntestJR1000_late <- dunnTest(log_MElaS_late ~ organ,
+         data=JR_1000_noflatData_late,
+         method="bh")
+dunn_df_JR1000_late <- dunntestJR1000_late$res
+
+dunn_df_JR1000_late <- dunn_df_JR1000_late %>%
+  separate_wider_delim(Comparison, delim = " - ", names = c("Tissue1", "Tissue2"))
+
+tissues <- unique(c(dunn_df_JR1000_late$Tissue1, dunn_df_JR1000_late$Tissue2))
+
+pairwise_matrix <- matrix(
+  NA,
+  nrow = length(tissues),
+  ncol = length(tissues),
+  dimnames = list(tissues, tissues)
+)
+
+for(i in 1:nrow(dunn_df_JR1000_late)) {
+  
+  t1 <- dunn_df_JR1000_late$Tissue1[i]
+  t2 <- dunn_df_JR1000_late$Tissue2[i]
+  p  <- dunn_df_JR1000_late$P.adj[i]
+  
+  pairwise_matrix[t1, t2] <- p
+  pairwise_matrix[t2, t1] <- p   # mirror value
+}
+
+diag(pairwise_matrix) <- 1
+pairwise_table <- as.data.frame(pairwise_matrix)
+
+write.csv(pairwise_matrix, "dunn_df_JR1000_late.csv", row.names = TRUE) #export dunn's test results
+
+#Log-scaled MElaS values comparisons of early and late MElaS values for each organ
+colors <- c(
+  "Duodenum"= "#8DD3C7", "Heart_A"= "#FFFFB3", "Heart_B" = "#BEBADA", "Heart_C" = "#FB8072",
+  "Heart_D"= "#80B1D3","Esophagus"= "#FDB462", "Upper_Stomach"= "#B3DE69", "Illeum"= "#FCCDE5",
+  "Cecum"= "#D9D9D9", "Jejunum"="#BC80BD", "Distal_Colon"= "#CCEBC5", "Proximal_Colon"= "#FFED6F"
+)
+boxplot_allorgans_JR1000_late <- ggplot(JR_1000_noflatData_late, aes(x = reorder(organ, -log_MElaS_late, FUN = median), y = log_MElaS_late, fill=organ))+ geom_boxplot()+scale_fill_manual(values = colors) +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=15)) + theme(axis.title.y = element_text(size = rel(1.7))) + theme(axis.title.x = element_text(size = rel(1.7))) +  labs(x="Organ", y=expression(Log [10]~MElaS~(Late))) + theme(legend.position="none")
+
+print(boxplot_allorgans_JR1000_late)
+
+#CL 1000
+#early
+#Kruskal Wallis test to compare significance among organs
+CL_1000_noflatData_early<- CL_1000_noflatData %>%
+  filter(MElaS_0v3v24 !=0) %>%
+  mutate(log_MElaS_early = log10(MElaS_0v3v24))
+
+kruskal.test(log_MElaS_early ~ organ, data = CL_1000_noflatData_early) #organs are significantly different p<2.2e-16
+
+ #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
+dunntestCL1000_early <- dunnTest(log_MElaS_early ~ organ,
+         data=CL_1000_noflatData_early,
+         method="bh")
+dunn_df_CL1000_early <- dunntestCL1000_early$res
+
+dunn_df_CL1000_early <- dunn_df_CL1000_early %>%
+  separate_wider_delim(Comparison, delim = " - ", names = c("Tissue1", "Tissue2"))
+
+tissues <- unique(c(dunn_df_CL1000_early$Tissue1, dunn_df_CL1000_early$Tissue2))
+
+pairwise_matrix <- matrix(
+  NA,
+  nrow = length(tissues),
+  ncol = length(tissues),
+  dimnames = list(tissues, tissues)
+)
+
+for(i in 1:nrow(dunn_df_CL1000_early)) {
+  
+  t1 <- dunn_df_CL1000_early$Tissue1[i]
+  t2 <- dunn_df_CL1000_early$Tissue2[i]
+  p  <- dunn_df_CL1000_early$P.adj[i]
+  
+  pairwise_matrix[t1, t2] <- p
+  pairwise_matrix[t2, t1] <- p   # mirror value
+}
+
+diag(pairwise_matrix) <- 1
+pairwise_table <- as.data.frame(pairwise_matrix)
+
+write.csv(pairwise_matrix, "dunn_df_CL1000_early.csv", row.names = TRUE) #export dunn's test results
+
+
+#Log-scaled MElaS values comparisons of early and late MElaS values for each organ
+colors <- c(
+  "Duodenum"= "#8DD3C7", "Heart_A"= "#FFFFB3", "Heart_B" = "#BEBADA", "Heart_C" = "#FB8072",
+  "Heart_D"= "#80B1D3","Esophagus"= "#FDB462", "Upper_Stomach"= "#B3DE69", "Illeum"= "#FCCDE5",
+  "Cecum"= "#D9D9D9", "Jejunum"="#BC80BD", "Distal_Colon"= "#CCEBC5", "Proximal_Colon"= "#FFED6F"
+)
+boxplot_allorgans_CL1000_early <- ggplot(CL_1000_noflatData_early, aes(x = reorder(organ, -log_MElaS_early, FUN = median), y = log_MElaS_early, fill=organ))+ geom_boxplot()+scale_fill_manual(values = colors) +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=15)) + theme(axis.title.y = element_text(size = rel(1.7))) + theme(axis.title.x = element_text(size = rel(1.7))) +  labs(x="Organ", y=expression(Log [10]~MElaS~(Early))) + theme(legend.position="none")
+
+print(boxplot_allorgans_CL1000_early)
+
+#CL 1000
+#late
+#Kruskal Wallis test to compare significance among organs
+CL_1000_noflatData_late<- CL_1000_noflatData %>%
+  filter(MElaS_0v12v24 !=0) %>%
+  mutate(log_MElaS_late = log10(MElaS_0v12v24))
+
+kruskal.test(log_MElaS_late ~ organ, data = CL_1000_noflatData_late) #organs are significantly different p<2.2e-16
+
+ #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
+dunntestCL1000_late <- dunnTest(log_MElaS_late ~ organ,
+         data=CL_1000_noflatData_late,
+         method="bh")
+dunn_df_CL1000_late <- dunntestCL1000_late$res
+
+dunn_df_CL1000_late <- dunn_df_CL1000_late %>%
+  separate_wider_delim(Comparison, delim = " - ", names = c("Tissue1", "Tissue2"))
+
+tissues <- unique(c(dunn_df_CL1000_late$Tissue1, dunn_df_CL1000_late$Tissue2))
+
+pairwise_matrix <- matrix(
+  NA,
+  nrow = length(tissues),
+  ncol = length(tissues),
+  dimnames = list(tissues, tissues)
+)
+
+for(i in 1:nrow(dunn_df_CL1000_late)) {
+  
+  t1 <- dunn_df_CL1000_late$Tissue1[i]
+  t2 <- dunn_df_CL1000_late$Tissue2[i]
+  p  <- dunn_df_CL1000_late$P.adj[i]
+  
+  pairwise_matrix[t1, t2] <- p
+  pairwise_matrix[t2, t1] <- p   # mirror value
+}
+
+diag(pairwise_matrix) <- 1
+pairwise_table <- as.data.frame(pairwise_matrix)
+
+write.csv(pairwise_matrix, "dunn_df_CL1000_late.csv", row.names = TRUE) #export dunn's test results
+
+
+#Log-scaled MElaS values comparisons of early and late MElaS values for each organ
+colors <- c(
+  "Duodenum"= "#8DD3C7", "Heart_A"= "#FFFFB3", "Heart_B" = "#BEBADA", "Heart_C" = "#FB8072",
+  "Heart_D"= "#80B1D3","Esophagus"= "#FDB462", "Upper_Stomach"= "#B3DE69", "Illeum"= "#FCCDE5", "Cecum"= "#D9D9D9", "Jejunum"="#BC80BD", "Distal_Colon"= "#CCEBC5", "Proximal_Colon"= "#FFED6F"
+)
+boxplot_allorgans_CL1000_late <- ggplot(CL_1000_noflatData_late, aes(x = reorder(organ, -log_MElaS_late, FUN = median), y = log_MElaS_late, fill=organ))+ geom_boxplot() +scale_fill_manual(values = colors)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=15)) + theme(axis.title.y = element_text(size = rel(1.7))) + theme(axis.title.x = element_text(size = rel(1.7))) +  labs(x="Organ", y=expression(Log [10]~MElaS~(Late))) + theme(legend.position="none")
+
+print(boxplot_allorgans_CL1000_late)
+
+
+```
+
+```{r}
+#JR 100
+#early
+#Kruskal Wallis test to compare significance among organs
+JR_100_noflatData_early<- JR_100_noflatData %>%
+  filter(MElaS_0v3v24 !=0) %>%
+  mutate(log_MElaS_early = log10(MElaS_0v3v24))
+
+kruskal.test(log_MElaS_early ~ organ, data = JR_100_noflatData_early) #organs are significantly different p<2.2e-16
+
+ #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
+dunntestJR100_early <- dunnTest(log_MElaS_early ~ organ,
+         data=JR_100_noflatData_early,
+         method="bh")
+dunn_df_JR100_early <- dunntestJR100_early$res
+
+dunn_df_JR100_early <- dunn_df_JR100_early %>%
+  separate_wider_delim(Comparison, delim = " - ", names = c("Tissue1", "Tissue2"))
+
+tissues <- unique(c(dunn_df_JR100_early$Tissue1, dunn_df_JR100_early$Tissue2))
+
+pairwise_matrix <- matrix(
+  NA,
+  nrow = length(tissues),
+  ncol = length(tissues),
+  dimnames = list(tissues, tissues)
+)
+
+for(i in 1:nrow(dunn_df_JR100_early)) {
+  
+  t1 <- dunn_df_JR100_early$Tissue1[i]
+  t2 <- dunn_df_JR100_early$Tissue2[i]
+  p  <- dunn_df_JR100_early$P.adj[i]
+  
+  pairwise_matrix[t1, t2] <- p
+  pairwise_matrix[t2, t1] <- p   # mirror value
+}
+
+diag(pairwise_matrix) <- 1
+pairwise_table <- as.data.frame(pairwise_matrix)
+
+write.csv(pairwise_matrix, "dunn_df_JR100_early.csv", row.names = TRUE) #export dunn's test results
+
+#Log-scaled MElaS values comparisons of early MElaS values for each organ
+colors <- c(
+  "Duodenum"= "#8DD3C7", "Heart_A"= "#FFFFB3", "Heart_B" = "#BEBADA", "Heart_C" = "#FB8072",
+  "Heart_D"= "#80B1D3","Esophagus"= "#FDB462", "Upper_Stomach"= "#B3DE69", "Illeum"= "#FCCDE5",
+  "Cecum"= "#D9D9D9", "Jejunum"="#BC80BD", "Distal_Colon"= "#CCEBC5", "Proximal_Colon"= "#FFED6F"
+)
+boxplot_allorgans_JR100_early <- ggplot(JR_100_noflatData_early, aes(x = reorder(organ, -log_MElaS_early, FUN = median), y = log_MElaS_early, fill=organ))+ geom_boxplot() +scale_fill_manual(values = colors) +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=15)) + theme(axis.title.y = element_text(size = rel(1.7))) + theme(axis.title.x = element_text(size = rel(1.7))) +  labs(x="Organ", y=expression(Log [10]~MElaS~(Early))) + theme(legend.position="none")
+
+print(boxplot_allorgans_JR100_early)
+
+#JR 100
+#late
+#Kruskal Wallis test to compare significance among organs
+JR_100_noflatData_late<- JR_100_noflatData %>%
+  filter(MElaS_0v12v24 !=0) %>%
+  mutate(log_MElaS_late = log10(MElaS_0v12v24))
+
+kruskal.test(log_MElaS_late ~ organ, data = JR_100_noflatData_late) #organs are significantly different p<2.2e-16
+
+ #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
+dunntestJR100_late <- dunnTest(log_MElaS_late ~ organ,
+         data=JR_100_noflatData_late,
+         method="bh")
+dunn_df_JR100_late <- dunntestJR100_late$res
+
+dunn_df_JR100_late <- dunn_df_JR100_late %>%
+  separate_wider_delim(Comparison, delim = " - ", names = c("Tissue1", "Tissue2"))
+
+tissues <- unique(c(dunn_df_JR100_late$Tissue1, dunn_df_JR100_late$Tissue2))
+
+pairwise_matrix <- matrix(
+  NA,
+  nrow = length(tissues),
+  ncol = length(tissues),
+  dimnames = list(tissues, tissues)
+)
+
+for(i in 1:nrow(dunn_df_JR100_late)) {
+  
+  t1 <- dunn_df_JR100_late$Tissue1[i]
+  t2 <- dunn_df_JR100_late$Tissue2[i]
+  p  <- dunn_df_JR100_late$P.adj[i]
+  
+  pairwise_matrix[t1, t2] <- p
+  pairwise_matrix[t2, t1] <- p   # mirror value
+}
+
+diag(pairwise_matrix) <- 1
+pairwise_table <- as.data.frame(pairwise_matrix)
+
+write.csv(pairwise_matrix, "dunn_df_JR100_late.csv", row.names = TRUE) #export dunn's test results
+
+#Log-scaled MElaS values comparisons of early MElaS values for each organ
+colors <- c(
+  "Duodenum"= "#8DD3C7", "Heart_A"= "#FFFFB3", "Heart_B" = "#BEBADA", "Heart_C" = "#FB8072",
+  "Heart_D"= "#80B1D3","Esophagus"= "#FDB462", "Upper_Stomach"= "#B3DE69", "Illeum"= "#FCCDE5",
+  "Cecum"= "#D9D9D9", "Jejunum"="#BC80BD", "Distal_Colon"= "#CCEBC5", "Proximal_Colon"= "#FFED6F"
+)
+boxplot_allorgans_JR100_late <- ggplot(JR_100_noflatData_late, aes(x = reorder(organ, -log_MElaS_late, FUN = median), y = log_MElaS_late, fill=organ))+ geom_boxplot()+scale_fill_manual(values = colors) +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=15)) + theme(axis.title.y = element_text(size = rel(1.7))) + theme(axis.title.x = element_text(size = rel(1.7))) +  labs(x="Organ", y=expression(Log [10]~MElaS~(Late))) + theme(legend.position="none")
+
+print(boxplot_allorgans_JR100_late)
+
+#CL 100
+#early
+#Kruskal Wallis test to compare significance among organs
+CL_100_noflatData_early<- CL_100_noflatData %>%
+  filter(MElaS_0v3v24 !=0) %>%
+  mutate(log_MElaS_early = log10(MElaS_0v3v24))
+
+kruskal.test(log_MElaS_early ~ organ, data = CL_100_noflatData_early) #organs are significantly different p<2.2e-16
+
+ #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
+dunntestCL100_early <- dunnTest(log_MElaS_early ~ organ,
+         data=CL_100_noflatData_early,
+         method="bh")
+dunn_df_CL100_early <- dunntestCL100_early$res
+
+dunn_df_CL100_early <- dunn_df_CL100_early %>%
+  separate_wider_delim(Comparison, delim = " - ", names = c("Tissue1", "Tissue2"))
+
+tissues <- unique(c(dunn_df_CL100_early$Tissue1, dunn_df_CL100_early$Tissue2))
+
+pairwise_matrix <- matrix(
+  NA,
+  nrow = length(tissues),
+  ncol = length(tissues),
+  dimnames = list(tissues, tissues)
+)
+
+for(i in 1:nrow(dunn_df_CL100_early)) {
+  
+  t1 <- dunn_df_CL100_early$Tissue1[i]
+  t2 <- dunn_df_CL100_early$Tissue2[i]
+  p  <- dunn_df_CL100_early$P.adj[i]
+  
+  pairwise_matrix[t1, t2] <- p
+  pairwise_matrix[t2, t1] <- p   # mirror value
+}
+
+diag(pairwise_matrix) <- 1
+pairwise_table <- as.data.frame(pairwise_matrix)
+
+write.csv(pairwise_matrix, "dunn_df_CL100_early.csv", row.names = TRUE) #export dunn's test results
+
+#Log-scaled MElaS values comparisons of early MElaS values for each organ
+colors <- c(
+  "Duodenum"= "#8DD3C7", "Heart_A"= "#FFFFB3", "Heart_B" = "#BEBADA", "Heart_C" = "#FB8072",
+  "Heart_D"= "#80B1D3","Esophagus"= "#FDB462", "Upper_Stomach"= "#B3DE69", "Illeum"= "#FCCDE5",
+  "Cecum"= "#D9D9D9", "Jejunum"="#BC80BD", "Distal_Colon"= "#CCEBC5", "Proximal_Colon"= "#FFED6F"
+)
+boxplot_allorgans_CL100_early <- ggplot(CL_100_noflatData_early, aes(x = reorder(organ, -log_MElaS_early, FUN = median), y = log_MElaS_early, fill=organ))+ geom_boxplot()+scale_fill_manual(values = colors) +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=15)) + theme(axis.title.y = element_text(size = rel(1.7))) + theme(axis.title.x = element_text(size = rel(1.7))) +  labs(x="Organ", y=expression(Log [10]~MElaS~(Early))) + theme(legend.position="none")
+
+print(boxplot_allorgans_CL100_early)
+
+#CL 100
+#late
+#Kruskal Wallis test to compare significance among organs
+CL_100_noflatData_late<- CL_100_noflatData %>%
+  filter(MElaS_0v12v24 !=0) %>%
+  mutate(log_MElaS_late = log10(MElaS_0v12v24))
+
+kruskal.test(log_MElaS_late ~ organ, data = CL_100_noflatData_late) #organs are significantly different p<2.2e-16
+
+ #Benjamini–Hochberg FDR corrected Dunn’s post hoc multiple comparison test
+dunntestCL100_late <- dunnTest(log_MElaS_late ~ organ,
+         data=CL_100_noflatData_late,
+         method="bh")
+dunn_df_CL100_late <- dunntestCL100_late$res
+
+dunn_df_CL100_late <- dunn_df_CL100_late %>%
+  separate_wider_delim(Comparison, delim = " - ", names = c("Tissue1", "Tissue2"))
+
+tissues <- unique(c(dunn_df_CL100_late$Tissue1, dunn_df_CL100_late$Tissue2))
+
+pairwise_matrix <- matrix(
+  NA,
+  nrow = length(tissues),
+  ncol = length(tissues),
+  dimnames = list(tissues, tissues)
+)
+
+for(i in 1:nrow(dunn_df_CL100_late)) {
+  
+  t1 <- dunn_df_CL100_late$Tissue1[i]
+  t2 <- dunn_df_CL100_late$Tissue2[i]
+  p  <- dunn_df_CL100_late$P.adj[i]
+  
+  pairwise_matrix[t1, t2] <- p
+  pairwise_matrix[t2, t1] <- p   # mirror value
+}
+
+diag(pairwise_matrix) <- 1
+pairwise_table <- as.data.frame(pairwise_matrix)
+
+write.csv(pairwise_matrix, "dunn_df_CL100_late.csv", row.names = TRUE) #export dunn's test results
+
+#Log-scaled MElaS values comparisons of early MElaS values for each organ
+colors <- c(
+  "Duodenum"= "#8DD3C7", "Heart_A"= "#FFFFB3", "Heart_B" = "#BEBADA", "Heart_C" = "#FB8072",
+  "Heart_D"= "#80B1D3","Esophagus"= "#FDB462", "Upper_Stomach"= "#B3DE69", "Illeum"= "#FCCDE5", "Cecum"= "#D9D9D9", "Jejunum"="#BC80BD", "Distal_Colon"= "#CCEBC5", "Proximal_Colon"= "#FFED6F"
+)
+boxplot_allorgans_CL100_late <- ggplot(CL_100_noflatData_late, aes(x = reorder(organ, -log_MElaS_late, FUN = median), y = log_MElaS_late, fill=organ))+ geom_boxplot() +scale_fill_manual(values = colors)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +theme_bw() +theme(axis.text.y = element_text(size=13))+ theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=1, size=15)) + theme(axis.title.y = element_text(size = rel(1.7))) + theme(axis.title.x = element_text(size = rel(1.7))) +  labs(x="Organ", y=expression(Log [10]~MElaS~(Late))) + theme(legend.position="none")
+
+print(boxplot_allorgans_CL100_late)
+
+```
+
+# Impact of T. cruzi strain on MElaS values
+## Run a Benjamini–Hochberg FDR corrected Wilcoxon signed-rank test comparing by parasite strains
+### Early MElaS
+```{r}
+noflatData_early<- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v3v24)) %>%
+  filter(MElaS_0v3v24 !=0)
+
+noflatData_early$Group <- paste0(noflatData_early$parasite_species, "_", noflatData_early$infected_parasites)
+
+p_values_df <- data.frame(Organ = character(),
+                          Group1 = character(),
+                          Group2 = character(),
+                          Test = character(),
+                          P_Value = numeric(),
+                          Fold_Change = numeric(),
+                          stringsAsFactors = FALSE)
+
+OrganList <- c(unique(noflatData_early$organ))
+for (Organ in OrganList){
+  print(Organ)
+  temp <- noflatData_early[noflatData_early$organ == Organ,]
+  comparisons <- combn(levels(factor(temp$Group)), 2, simplify = FALSE)
+  comparisons <- c(comparisons[2], comparisons[5])
+    for (comp in comparisons) {
+      group1 <- comp[1]
+      group2 <- comp[2]
+      
+      # Subset data for the two strains
+      temp_subset <- temp[temp$Group %in% c(group1, group2), ]
+      
+      if (length(unique(temp_subset[temp_subset$Group == group1,]$log_MElaS)) > 1 & length(temp_subset[temp_subset$Group == group1,]$log_MElaS) > 2) {
+        normalcy1 <- shapiro.test(temp_subset[temp_subset$Group == group1,]$log_MElaS)$p.value
+        } else {
+          normalcy1 <- 0 
+        }
+      if (length(unique(temp_subset[temp_subset$Group == group2,]$log_MElaS)) > 1 & length(temp_subset[temp_subset$Group == group2,]$log_MElaS) > 2) {
+        normalcy2 <- shapiro.test(temp_subset[temp_subset$Group == group2,]$log_MElaS)$p.value
+        } else {
+          normalcy2 <- 0 
+        }
+    
+      # Choose the appropriate test based on normality
+      if (normalcy1 < 0.05 | normalcy2 < 0.05) {
+        test_used <- "Wilcoxon"
+        plotTest <- "wilcox.test"
+        p_val <- wilcox.test(log_MElaS ~ Group, data = temp_subset)$p.value
+      } else {
+        test_used <- "T-test"
+        plotTest <- "t.test"
+        p_val <- t.test(log_MElaS ~ Group, data = temp_subset)$p.value
+      }
+      
+      #make fold change
+      fc <- median(temp_subset[temp_subset$Group == group1,]$log_MElaS)/median(temp_subset[temp_subset$Group == group2,]$log_MElaS)
+      
+      # Store results in the data frame
+      p_values_df <- rbind(p_values_df, data.frame(
+        Organ = Organ,
+        Group1 = group1,
+        Group2 = group2,
+        Test = test_used,
+        Fold_Change = fc,
+        P_Value = p_val
+      ))
+    }
+}
+#p-value adjustment
+p_values_df$p_value_adj <- 
+  p.adjust(p_values_df$P_Value, method = "BH")
+
+write.csv(p_values_df, "by_parasite_group_early_pvalues.csv", row.names = FALSE)
+```
+
+# Impact of T. cruzi strain on MElaS values
+## Run a Benjamini–Hochberg FDR corrected Wilcoxon signed-rank test comparing by parasite strains
+### Late MElaS
+```{r}
+noflatData_late<- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v12v24)) %>%
+  filter(MElaS_0v12v24 !=0)
+
+noflatData_late$Group <- paste0(noflatData_late$parasite_species, "_", noflatData_late$infected_parasites)
+
+p_values_df <- data.frame(Organ = character(),
+                          Group1 = character(),
+                          Group2 = character(),
+                          Test = character(),
+                          P_Value = numeric(),
+                          Fold_Change = numeric(),
+                          stringsAsFactors = FALSE)
+
+OrganList <- c(unique(noflatData_late$organ))
+for (Organ in OrganList){
+  print(Organ)
+  temp <- noflatData_late[noflatData_late$organ == Organ,]
+  comparisons <- combn(levels(factor(temp$Group)), 2, simplify = FALSE)
+  comparisons <- c(comparisons[2], comparisons[5])
+    for (comp in comparisons) {
+      group1 <- comp[1]
+      group2 <- comp[2]
+      
+      # Subset data for the two strains
+      temp_subset <- temp[temp$Group %in% c(group1, group2), ]
+      
+      if (length(unique(temp_subset[temp_subset$Group == group1,]$log_MElaS)) > 1 & length(temp_subset[temp_subset$Group == group1,]$log_MElaS) > 2) {
+        normalcy1 <- shapiro.test(temp_subset[temp_subset$Group == group1,]$log_MElaS)$p.value
+        } else {
+          normalcy1 <- 0 
+        }
+      if (length(unique(temp_subset[temp_subset$Group == group2,]$log_MElaS)) > 1 & length(temp_subset[temp_subset$Group == group2,]$log_MElaS) > 2) {
+        normalcy2 <- shapiro.test(temp_subset[temp_subset$Group == group2,]$log_MElaS)$p.value
+        } else {
+          normalcy2 <- 0 
+        }
+    
+      # Choose the appropriate test based on normality
+      if (normalcy1 < 0.05 | normalcy2 < 0.05) {
+        test_used <- "Wilcoxon"
+        plotTest <- "wilcox.test"
+        p_val <- wilcox.test(log_MElaS ~ Group, data = temp_subset)$p.value
+      } else {
+        test_used <- "T-test"
+        plotTest <- "t.test"
+        p_val <- t.test(log_MElaS ~ Group, data = temp_subset)$p.value
+      }
+      
+      #make fold change
+      fc <- median(temp_subset[temp_subset$Group == group1,]$log_MElaS)/median(temp_subset[temp_subset$Group == group2,]$log_MElaS)
+      
+      # Store results in the data frame
+      p_values_df <- rbind(p_values_df, data.frame(
+        Organ = Organ,
+        Group1 = group1,
+        Group2 = group2,
+        Test = test_used,
+        Fold_Change = fc,
+        P_Value = p_val
+      ))
+    }
+}
+#p-value adjustment
+p_values_df$p_value_adj <- 
+  p.adjust(p_values_df$P_Value, method = "BH")
+
+write.csv(p_values_df, "by_parasite_group_late_pvalues.csv", row.names = FALSE)
+```
+
+# Impact of Inoculum strain on MElaS values
+## Run a Benjamini–Hochberg FDR corrected Wilcoxon signed-rank test comparing by inoculum
+### Early MElaS
+```{r}
+noflatData_early<- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v3v24)) %>%
+  filter(MElaS_0v3v24 !=0)
+
+noflatData_early$Group <- paste0(noflatData_early$parasite_species, "_", noflatData_early$infected_parasites)
+
+p_values_df <- data.frame(Organ = character(),
+                          Group1 = character(),
+                          Group2 = character(),
+                          Test = character(),
+                          P_Value = numeric(),
+                          Fold_Change = numeric(),
+                          stringsAsFactors = FALSE)
+
+OrganList <- c(unique(noflatData_early$organ))
+for (Organ in OrganList){
+  print(Organ)
+  temp <- noflatData_early[noflatData_early$organ == Organ,]
+  comparisons <- combn(levels(factor(temp$Group)), 2, simplify = FALSE)
+  comparisons <- c(comparisons[1], comparisons[6])
+    for (comp in comparisons) {
+      group1 <- comp[1]
+      group2 <- comp[2]
+      
+      # Subset data for the two strains
+      temp_subset <- temp[temp$Group %in% c(group1, group2), ]
+      
+      if (length(unique(temp_subset[temp_subset$Group == group1,]$log_MElaS)) > 1 & length(temp_subset[temp_subset$Group == group1,]$log_MElaS) > 2) {
+        normalcy1 <- shapiro.test(temp_subset[temp_subset$Group == group1,]$log_MElaS)$p.value
+        } else {
+          normalcy1 <- 0 
+        }
+      if (length(unique(temp_subset[temp_subset$Group == group2,]$log_MElaS)) > 1 & length(temp_subset[temp_subset$Group == group2,]$log_MElaS) > 2) {
+        normalcy2 <- shapiro.test(temp_subset[temp_subset$Group == group2,]$log_MElaS)$p.value
+        } else {
+          normalcy2 <- 0 
+        }
+    
+      # Choose the appropriate test based on normality
+      if (normalcy1 < 0.05 | normalcy2 < 0.05) {
+        test_used <- "Wilcoxon"
+        plotTest <- "wilcox.test"
+        p_val <- wilcox.test(log_MElaS ~ Group, data = temp_subset)$p.value
+      } else {
+        test_used <- "T-test"
+        plotTest <- "t.test"
+        p_val <- t.test(log_MElaS ~ Group, data = temp_subset)$p.value
+      }
+      
+      #make fold change
+      fc <- median(temp_subset[temp_subset$Group == group1,]$log_MElaS)/median(temp_subset[temp_subset$Group == group2,]$log_MElaS)
+      
+      # Store results in the data frame
+      p_values_df <- rbind(p_values_df, data.frame(
+        Organ = Organ,
+        Group1 = group1,
+        Group2 = group2,
+        Test = test_used,
+        Fold_Change = fc,
+        P_Value = p_val
+      ))
+    }
+}
+#p-value adjustment
+p_values_df$p_value_adj <- 
+  p.adjust(p_values_df$P_Value, method = "BH")
+
+write.csv(p_values_df, "by_inoculum_group_early_pvalues.csv", row.names = FALSE)
+```
+
+# Impact of Inoculum strain on MElaS values
+## Run a Benjamini–Hochberg FDR corrected Wilcoxon signed-rank test comparing by inoculum
+### Late MElaS
+
+```{r}
+noflatData_late<- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v12v24)) %>%
+  filter(MElaS_0v12v24 !=0)
+
+noflatData_late$Group <- paste0(noflatData_late$parasite_species, "_", noflatData_late$infected_parasites)
+
+p_values_df <- data.frame(Organ = character(),
+                          Group1 = character(),
+                          Group2 = character(),
+                          Test = character(),
+                          P_Value = numeric(),
+                          Fold_Change = numeric(),
+                          stringsAsFactors = FALSE)
+
+OrganList <- c(unique(noflatData_late$organ))
+for (Organ in OrganList){
+  print(Organ)
+  temp <- noflatData_late[noflatData_late$organ == Organ,]
+  comparisons <- combn(levels(factor(temp$Group)), 2, simplify = FALSE)
+  comparisons <- c(comparisons[1], comparisons[6])
+    for (comp in comparisons) {
+      group1 <- comp[1]
+      group2 <- comp[2]
+      
+      # Subset data for the two strains
+      temp_subset <- temp[temp$Group %in% c(group1, group2), ]
+      
+      if (length(unique(temp_subset[temp_subset$Group == group1,]$log_MElaS)) > 1 & length(temp_subset[temp_subset$Group == group1,]$log_MElaS) > 2) {
+        normalcy1 <- shapiro.test(temp_subset[temp_subset$Group == group1,]$log_MElaS)$p.value
+        } else {
+          normalcy1 <- 0 
+        }
+      if (length(unique(temp_subset[temp_subset$Group == group2,]$log_MElaS)) > 1 & length(temp_subset[temp_subset$Group == group2,]$log_MElaS) > 2) {
+        normalcy2 <- shapiro.test(temp_subset[temp_subset$Group == group2,]$log_MElaS)$p.value
+        } else {
+          normalcy2 <- 0 
+        }
+    
+      # Choose the appropriate test based on normality
+      if (normalcy1 < 0.05 | normalcy2 < 0.05) {
+        test_used <- "Wilcoxon"
+        plotTest <- "wilcox.test"
+        p_val <- wilcox.test(log_MElaS ~ Group, data = temp_subset)$p.value
+      } else {
+        test_used <- "T-test"
+        plotTest <- "t.test"
+        p_val <- t.test(log_MElaS ~ Group, data = temp_subset)$p.value
+      }
+      
+      #make fold change
+      fc <- median(temp_subset[temp_subset$Group == group1,]$log_MElaS)/median(temp_subset[temp_subset$Group == group2,]$log_MElaS)
+      
+      # Store results in the data frame
+      p_values_df <- rbind(p_values_df, data.frame(
+        Organ = Organ,
+        Group1 = group1,
+        Group2 = group2,
+        Test = test_used,
+        Fold_Change = fc,
+        P_Value = p_val
+      ))
+    }
+}
+#p-value adjustment
+p_values_df$p_value_adj <- 
+  p.adjust(p_values_df$P_Value, method = "BH")
+
+write.csv(p_values_df, "by_inoculum_group_late_pvalues.csv", row.names = FALSE)
+```
+
+## Visulatization boxplots log-scaled early MElaS values by parasite strain 
+###Early
+
+```{r}
+#Figure: Log-scaled MElaS values for each organ by inoculation concentration 100
+# Colors
+fill_colors <- c(
+  "CL"  = "lightblue", 
+  "JR"  = "salmon"
+)
+
+noflatData$strain_conc <- paste0(
+  noflatData$parasite_species, "_",
+  noflatData$infected_parasites
+)
+noflatData_100_Early <- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v3v24)) %>%
+  filter(infected_parasites=="100")
+
+noflatData_100_Early$organ <- factor(noflatData_100_Early$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(data=noflatData_100_Early, aes(x = as.factor(organ), y = log_MElaS, fill = parasite_species)) + geom_boxplot(outlier.shape = NA, position = position_dodge(width = 0.8))  + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ labs(x="Organ", y=expression(Log [10]~MElaS~(Early)))+
+  
+  scale_fill_manual(values = fill_colors,
+                    name = "Strain") + 
+  coord_cartesian(ylim = c(-3.5, 2)) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 15),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.7)),
+    axis.title.y = element_text(size = rel(1.7)),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = rel(1.5)),
+    plot.title = element_text(size = 20)
+  )
+#Figure: Log-scaled MElaS values for each organ by inoculation concentration 1000
+# Colors
+fill_colors2 <- c(
+  "CL"  = "steel blue", 
+  "JR"  = "red3"
+)
+noflatData_1000_Early <- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v3v24)) %>%
+  filter(infected_parasites=="1000")
+
+noflatData_1000_Early$organ <- factor(noflatData_1000_Early$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(data=noflatData_1000_Early, aes(x = as.factor(organ), y = log_MElaS, fill = parasite_species)) + geom_boxplot(outlier.shape = NA, position = position_dodge(width = 0.8)) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ labs(x="Organ", y=expression(Log [10]~MElaS~(Early)))+
+  
+  scale_fill_manual(values = fill_colors2,
+                    name = "Strain") + 
+  coord_cartesian(ylim = c(-3.5, 2)) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 15),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.7)),
+    axis.title.y = element_text(size = rel(1.7)),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = rel(1.5)),
+    plot.title = element_text(size = 20)
+  )
+
+
+
+```
+
+## Visulatization boxplots log-scaled late MElaS values by parasite strain 
+###Late
+
+```{r}
+
+#Figure: Log-scaled MElaS values for each organ by inoculation concentration 100
+# Colors
+fill_colors <- c(
+  "CL"  = "lightblue", 
+  "JR"  = "salmon"
+)
+
+noflatData$strain_conc <- paste0(
+  noflatData$parasite_species, "_",
+  noflatData$infected_parasites
+)
+noflatData_100_Late <- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v12v24)) %>%
+  filter(infected_parasites=="100")
+
+noflatData_100_Late$organ <- factor(noflatData_100_Late$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(data=noflatData_100_Late, aes(x = as.factor(organ), y = log_MElaS, fill = parasite_species)) + geom_boxplot(outlier.shape = NA, position = position_dodge(width = 0.8))  + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ labs(x="Organ", y=expression(Log [10]~MElaS~(Late)))+
+  
+  scale_fill_manual(values = fill_colors,
+                    name = "Strain") + 
+  coord_cartesian(ylim = c(-3.5, 2)) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 15),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.7)),
+    axis.title.y = element_text(size = rel(1.7)),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = rel(1.5)),
+    plot.title = element_text(size = 20)
+  )
+#Figure: Log-scaled MElaS values for each organ by inoculation concentration 1000
+# Colors
+fill_colors2 <- c(
+  "CL"  = "steel blue", 
+  "JR"  = "red3"
+)
+noflatData_1000_Late <- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v12v24)) %>%
+  filter(infected_parasites=="1000")
+
+noflatData_1000_Late$organ <- factor(noflatData_1000_Late$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(data=noflatData_1000_Late, aes(x = as.factor(organ), y = log_MElaS, fill = parasite_species)) + geom_boxplot(outlier.shape = NA, position = position_dodge(width = 0.8)) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ labs(x="Organ", y=expression(Log [10]~MElaS~(Late)))+
+  
+  scale_fill_manual(values = fill_colors2,
+                    name = "Strain") + 
+  coord_cartesian(ylim = c(-3.5, 2)) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 15),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.7)),
+    axis.title.y = element_text(size = rel(1.7)),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = rel(1.5)),
+    plot.title = element_text(size = 20)
+  )
+
+
+```
+
+
+## Visulatization boxplots log-scaled early MElaS values by inoculum
+
+```{r}
+#Figure: Log-scaled MElaS values for each organ by CL Brener
+# Colors
+fill_colors <- c(
+  "100"  = "lightblue", 
+  "1000"  = "steel blue"
+)
+
+noflatData$strain_conc <- paste0(
+  noflatData$parasite_species, "_",
+  noflatData$infected_parasites
+)
+noflatData_100_Early <- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v3v24)) %>%
+  filter(parasite_species=="CL")
+
+noflatData_100_Early$organ <- factor(noflatData_100_Early$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(data=noflatData_100_Early, aes(x = as.factor(organ), y = log_MElaS, fill = infected_parasites)) + geom_boxplot(outlier.shape = NA, position = position_dodge(width = 0.8)) + stat_compare_means(
+    aes(group = infected_parasites),
+    method = "wilcox.test",
+    label = "p.signif",
+    hide.ns = TRUE,
+    p.adjust.method = "BH",
+    bracket.size = 0.8,
+    label.y = 1.8
+  )  + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ labs(x="Organ", y=expression(Log [10]~MElaS~(Early)))+
+  
+  scale_fill_manual(values = fill_colors,
+                    name = "Inoculum") + 
+  coord_cartesian(ylim = c(-3.5, 2)) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 15),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.7)),
+    axis.title.y = element_text(size = rel(1.7)),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = rel(1.5)),
+    plot.title = element_text(size = 20)
+  )
+#Figure: Log-scaled MElaS values for each organ by inoculation concentration JR
+# Colors
+fill_colors2 <- c(
+  "100"  = "salmon", 
+  "1000"  = "red3"
+)
+noflatData_1000_Early <- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v3v24)) %>%
+  filter(parasite_species=="JR")
+
+noflatData_1000_Early$organ <- factor(noflatData_1000_Early$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(data=noflatData_1000_Early, aes(x = as.factor(organ), y = log_MElaS, fill = infected_parasites)) + geom_boxplot(outlier.shape = NA, position = position_dodge(width = 0.8)) + stat_compare_means(
+    aes(group = infected_parasites),
+    method = "wilcox.test",
+    label = "p.signif",
+    hide.ns = TRUE,
+    p.adjust.method = "BH",
+    bracket.size = 0.8,
+    label.y = 1.8
+  )  + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ labs(x="Organ", y=expression(Log [10]~MElaS~(Early)))+
+  
+  scale_fill_manual(values = fill_colors2,
+                    name = "inoculum") + 
+  coord_cartesian(ylim = c(-3.5, 2)) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 15),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.7)),
+    axis.title.y = element_text(size = rel(1.7)),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = rel(1.5)),
+    plot.title = element_text(size = 20)
+  )
+
+
+
+```
+
+## Visulatization boxplots log-scaled late MElaS values by inoculum
+
+```{r}
+
+#Figure: Log-scaled MElaS values for each organ by CL Brener
+# Colors
+fill_colors <- c(
+  "100"  = "lightblue", 
+  "1000"  = "steel blue"
+)
+
+noflatData$strain_conc <- paste0(
+  noflatData$parasite_species, "_",
+  noflatData$infected_parasites
+)
+noflatData_100_Late <- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v12v24)) %>%
+  filter(parasite_species=="CL")
+
+noflatData_100_Late$organ <- factor(noflatData_100_Late$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(data=noflatData_100_Late, aes(x = as.factor(organ), y = log_MElaS, fill = infected_parasites)) + geom_boxplot(outlier.shape = NA, position = position_dodge(width = 0.8)) + stat_compare_means(
+    aes(group = infected_parasites),
+    method = "wilcox.test",
+    label = "p.signif",
+    hide.ns = TRUE,
+    p.adjust.method = "BH",
+    bracket.size = 0.8,
+    label.y = 1.8
+  )  + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ labs(x="Organ", y=expression(Log [10]~MElaS~(Late)))+
+  
+  scale_fill_manual(values = fill_colors,
+                    name = "Inoculum") + 
+  coord_cartesian(ylim = c(-3.5, 2)) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 15),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.7)),
+    axis.title.y = element_text(size = rel(1.7)),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = rel(1.5)),
+    plot.title = element_text(size = 20)
+  )
+#Figure: Log-scaled MElaS values for each organ by inoculation concentration 1000
+# Colors
+fill_colors2 <- c(
+  "100"  = "salmon", 
+  "1000"  = "red3"
+)
+noflatData_1000_Late <- noflatData %>%
+  mutate(log_MElaS = log10(MElaS_0v12v24)) %>%
+  filter(parasite_species=="JR")
+
+noflatData_1000_Late$organ <- factor(noflatData_1000_Late$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+ggplot(data=noflatData_1000_Late, aes(x = as.factor(organ), y = log_MElaS, fill = infected_parasites)) + geom_boxplot(outlier.shape = NA, position = position_dodge(width = 0.8)) + stat_compare_means(
+    aes(group = infected_parasites),
+    method = "wilcox.test",
+    label = "p.signif",
+    hide.ns = TRUE,
+    p.adjust.method = "BH",
+    bracket.size = 0.8,
+    label.y = 1.8
+  )  + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ labs(x="Organ", y=expression(Log [10]~MElaS~(Late)))+
+  
+  scale_fill_manual(values = fill_colors2,
+                    name = "Inoculum") + 
+  coord_cartesian(ylim = c(-3.5, 2)) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 15),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.7)),
+    axis.title.y = element_text(size = rel(1.7)),
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = rel(1.5)),
+    plot.title = element_text(size = 20)
+  )
+
+
+```
+redo!!!!
+# Impact of T. cruzi strain on the proportion of elastic metabolites
+##Early
+```{r}
+#percentage of nonzeros by organ 
+proportion_non_zero_by_organ_early <- noflatData %>%
+  group_by(organ, parasite_species, infected_parasites) %>%
+  summarise(
+    non_zero_count_organ=sum(Type == "inelastic"),
+    total_rows_organ=n(),
+    zero_count=total_rows_organ-non_zero_count_organ,
+    proportion_non_zero_organ = (non_zero_count_organ / total_rows_organ) *100,
+    proportion_non_zero_organ =format(round(proportion_non_zero_organ, 3), nsmall = 3)
+  )
+
+proportion_non_zero_by_organ_early$proportion_non_zero_organ=as.numeric(proportion_non_zero_by_organ_early$proportion_non_zero_organ)
+```
+
+## Percentage of Non-Zero MElas Scores per Organ Barplots
+
+```{r}
+
+proportion_non_zero_by_organ_early$strain_conc <- paste0(
+  proportion_non_zero_by_organ_early$parasite_species, "_",
+  proportion_non_zero_by_organ_early$infected_parasites
+)
+proportion_non_zero_by_organ_early$organ <- factor(proportion_non_zero_by_organ_early$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+proportion_non_zero_by_organ_early_1000 <- proportion_non_zero_by_organ_early %>%
+  filter(infected_parasites=="1000")
+
+proportion_non_zero_by_organ_early_100 <- proportion_non_zero_by_organ_early %>%
+  filter(infected_parasites=="100")
+
+
+#Figure 5A. Comparison of the proportion of metabolites with a MElaS value of nonzero for 1000
+# Colors
+fill_colors <- c(
+  "CL" = "steel blue",
+  "JR" = "red3"
+)
+
+ggplot(data = proportion_non_zero_by_organ_early_1000,
+       aes(x = as.factor(organ),
+           y = proportion_non_zero_organ,
+           fill = parasite_species)) +
+  geom_col(position = position_dodge(width = 0.9)) +
+  
+  scale_fill_manual(values = fill_colors,
+                    name = "Strain") +
+  
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.8)),
+    axis.title.y = element_text(size = rel(1.8)),
+    legend.text = element_text(size = 13),
+    legend.title = element_text(size = rel(1.3))
+  ) +
+  labs(x = "Organ", y = "Percentage (%)")
+
+#Figure 5B. Comparison of the proportion of metabolites with a MElaS value of nonzero for each organ by 100
+# Colors
+fill_colors <- c(
+  "CL"  = "lightblue", 
+  "JR"  = "salmon"
+)
+
+ggplot(data = proportion_non_zero_by_organ_early_100,
+       aes(x = as.factor(organ),
+           y = proportion_non_zero_organ,
+           fill = parasite_species)) +
+  geom_col(position = position_dodge(width = 0.9)) +
+  
+  scale_fill_manual(values = fill_colors,
+                    name = "Strain") +
+  
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.8)),
+    axis.title.y = element_text(size = rel(1.8)),
+    legend.text = element_text(size = 13),
+    legend.title = element_text(size = rel(1.3))
+  ) +
+  labs(x = "Organ", y = "Percentage (%)")
+
+
+```
+
+# Impact of inoculation concentration and T. cruzi strain on the proportion of elastic metabolites
+##Late
+```{r}
+#percentage of nonzeros by organ 
+proportion_non_zero_by_organ_late <- dataWithMElaSTypes %>%
+  group_by(organ, parasite_species, infected_parasites) %>%
+  summarise(
+    non_zero_count_organ=sum(Type == "late_elastic"),
+    total_rows_organ=n(),
+    proportion_non_zero_organ = (non_zero_count_organ / total_rows_organ) *100,
+    proportion_non_zero_organ =format(round(proportion_non_zero_organ, 3), nsmall = 3),
+    zero_count=total_rows_organ-non_zero_count_organ
+  )
+
+proportion_non_zero_by_organ_late$proportion_non_zero_organ=as.numeric(proportion_non_zero_by_organ_late$proportion_non_zero_organ)
+```
+
+## Percentage of Non-Zero MElas Scores per Organ Barplots
+
+```{r}
+
+proportion_non_zero_by_organ_late$strain_conc <- paste0(
+  proportion_non_zero_by_organ_late$parasite_species, "_",
+  proportion_non_zero_by_organ_late$infected_parasites
+)
+proportion_non_zero_by_organ_late$organ <- factor(proportion_non_zero_by_organ_late$organ, levels=c("Heart_A", "Heart_B", "Heart_C", "Heart_D", "Esophagus", "Upper_Stomach", "Duodenum", "Jejunum", "Ileum", "Cecum", "Proximal_Colon", "Distal_Colon"))
+
+proportion_non_zero_by_organ_late_1000 <- proportion_non_zero_by_organ_late %>%
+  filter(infected_parasites=="1000")
+
+proportion_non_zero_by_organ_late_100 <- proportion_non_zero_by_organ_late %>%
+  filter(infected_parasites=="100")
+
+
+#Figure 5A. Comparison of the proportion of metabolites with a MElaS value of nonzero for 1000
+# Colors
+fill_colors <- c(
+  "CL" = "steel blue",
+  "JR" = "red3"
+)
+
+ggplot(data = proportion_non_zero_by_organ_late_1000,
+       aes(x = as.factor(organ),
+           y = proportion_non_zero_organ,
+           fill = parasite_species)) +
+  geom_col(position = position_dodge(width = 0.9)) +
+  
+  scale_fill_manual(values = fill_colors,
+                    name = "Strain") +
+  
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.8)),
+    axis.title.y = element_text(size = rel(1.8)),
+    legend.text = element_text(size = 13),
+    legend.title = element_text(size = rel(1.3))
+  ) +
+  labs(x = "Organ", y = "Percentage (%)")
+
+#Figure 5B. Comparison of the proportion of metabolites with a MElaS value of nonzero for each organ by 100
+# Colors
+fill_colors <- c(
+  "CL"  = "lightblue", 
+  "JR"  = "salmon"
+)
+
+ggplot(data = proportion_non_zero_by_organ_late_100,
+       aes(x = as.factor(organ),
+           y = proportion_non_zero_organ,
+           fill = parasite_species)) +
+  geom_col(position = position_dodge(width = 0.9)) +
+  
+  scale_fill_manual(values = fill_colors,
+                    name = "Strain") +
+  
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = rel(1.8)),
+    axis.title.y = element_text(size = rel(1.8)),
+    legend.text = element_text(size = 13),
+    legend.title = element_text(size = rel(1.3))
+  ) +
+  labs(x = "Organ", y = "Percentage (%)")
+
+
+```
+
+# UpSet Plot
+```{r}
+SpeciesList <- c(unique(merged_all_df_noflat$parasite_species))
+TypeList <- c(unique(merged_all_df_noflat$Type))
+
+for (species in SpeciesList){
+  for (type in TypeList){
+    print(species)
+    print(type)
+    JR_1000_noflatData_early<- merged_all_df_noflat %>%
+  filter(parasite_species==species, infected_parasites=="1000", Type==type)
+    upset_data <- JR_1000_noflatData_early %>%
+  distinct(ID, superclass, organ) %>%
+  mutate(value = 1) %>%
+  pivot_wider(
+    names_from = organ,
+    values_from = value,
+    values_fill = FALSE
+  )
+
+organ_cols <- setdiff(colnames(upset_data), c("ID", "superclass"))
+
+# Remove ID column
+plot_matrix <- as.data.frame(upset_data[, -1])
+
+plot <- upset(
+  upset_data,
+  intersect = organ_cols,
+  
+  base_annotations = list(
+    "Intersection Size" =
+      intersection_size(
+        mapping = aes(fill = superclass)
+      )
+  )
+) +
+  scale_fill_brewer(palette = "Set3") +
+  theme_bw()
+print(plot)
+}}
+  
+
+
+```
+
+
+
+```{r}
+#by strain
+merged_all_df_noflat$strain_conc <- paste0(
+  merged_all_df_noflat$parasite_species, "_",
+  merged_all_df_noflat$infected_parasites
+)
+
+OrganList <- c(unique(merged_all_df_noflat$organ))
+
+for (Organ in OrganList){
+  print(Organ)
+  JR_1000_noflatData_early<- merged_all_df_noflat %>%
+  filter(Organ==organ)
+  upset_data <- JR_1000_noflatData_early %>%
+  distinct(ID, superclass, strain_conc) %>%
+  mutate(value = 1) %>%
+  pivot_wider(
+    names_from = strain_conc,
+    values_from = value,
+    values_fill = FALSE
+  )
+
+organ_cols <- setdiff(colnames(upset_data), c("ID", "superclass"))
+
+# Remove ID column
+plot_matrix <- as.data.frame(upset_data[, -1])
+
+plot <- upset(
+  upset_data,
+  intersect = organ_cols,
+  
+  base_annotations = list(
+    "Intersection Size" =
+      intersection_size(
+        mapping = aes(fill = superclass)
+      )
+  )
+) +
+  scale_fill_brewer(palette = "Set3") +
+  ggtitle(paste0(Organ)) +
+  theme_bw()
+  print(plot)
+}
+
+
+```
+
+```{r}
+# by type of elasticity
+merged_all_df_noflat$strain_conc <- paste0(
+  merged_all_df_noflat$parasite_species, "_",
+  merged_all_df_noflat$infected_parasites
+)
+
+OrganList <- c(unique(merged_all_df_noflat$organ))
+
+StrainList <- c(unique(merged_all_df_noflat$strain_conc))
+
+for (Organ in OrganList){
+  for (Strain in StrainList){
+    print(Organ)
+    print(Strain)
+    JR_1000_noflatData_early<- merged_all_df_noflat %>%
+      filter(Organ==organ, Strain==strain_conc)
+    upset_data <- JR_1000_noflatData_early %>%
+      distinct(ID, superclass, Type) %>%
+      mutate(value = 1) %>%
+      pivot_wider(
+        names_from = Type,
+        values_from = value,
+        values_fill = FALSE)
+
+    organ_cols <- setdiff(colnames(upset_data), c("ID", "superclass"))
+
+    # Remove ID column
+    plot_matrix <- as.data.frame(upset_data[, -1])
+
+    plot <- upset(
+      upset_data,
+      intersect = organ_cols,
+      
+      base_annotations = list(
+        "Intersection Size" =
+          intersection_size(
+            mapping = aes(fill = superclass)
+          )
+      )
+    ) +
+      scale_fill_brewer(palette = "Set3") +
+      ggtitle(paste0(Organ, ", ", Strain)) +
+      theme_bw()
+      print(plot)
+  }
+  }
+
+  print(Organ)
+  JR_1000_noflatData_early<- merged_all_df_noflat %>%
+  filter(Organ==organ)
+  upset_data <- JR_1000_noflatData_early %>%
+  distinct(ID, superclass, Type) %>%
+  mutate(value = 1) %>%
+  pivot_wider(
+    names_from = Type,
+    values_from = value,
+    values_fill = FALSE
+  )
+
+organ_cols <- setdiff(colnames(upset_data), c("ID", "superclass"))
+
+# Remove ID column
+plot_matrix <- as.data.frame(upset_data[, -1])
+
+plot <- upset(
+  upset_data,
+  intersect = organ_cols,
+  
+  base_annotations = list(
+    "Intersection Size" =
+      intersection_size(
+        mapping = aes(fill = superclass)
+      )
+  )
+) +
+  scale_fill_brewer(palette = "Set3") +
+  ggtitle(paste0(Organ)) +
+  theme_bw()
+  print(plot)
+
+```
+
