@@ -1,0 +1,71 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+This code will use a formula and calculate MElaS at A, B and C weeks for each metabolite at different conditions. A new csv file will be created that includes these MElaS values.
+
+```{r, echo=FALSE, out.width="50%", fig.align="center", fig.cap="Your Caption"}
+knitr::include_graphics("~/Desktop/Metabolic_Elascity_Score_Project/MElaS_explained.png")
+```
+
+## Install and load packages
+
+```{r}
+#install.packages("matrixStats")
+library(matrixStats) # version 0.58.0
+
+#install.packages("data.table")
+library(data.table) # version 1.14.3
+
+#install.packages("dplyr")
+library(dplyr) # version 1.1.4
+
+#install.packages("stringr")
+library(stringr) # version 1.5.1
+
+```
+
+## Import data that includes FC and p-values of all metabolites
+
+```{r}
+FC_values <- read.csv("MElaS_FC_pvalues.csv")
+```
+
+## Calculate MElaS 
+
+```{r}
+# Rename the names of your FC and p-values from your FC conversion file
+colnames(FC_values)[colnames(FC_values) == "logFC_3v0"] <- "BvA"
+colnames(FC_values)[colnames(FC_values) == "logFC_24v3"] <- "CvB"
+colnames(FC_values)[colnames(FC_values) == "adj.P.Val_24v3"] <- "P_valueCvB"
+
+MElaS_Values <- FC_values %>%
+  mutate(
+
+    # Sign term: determined dynamics
+    Sign = ifelse(BvA * CvB < 0, 1, 0),
+
+    # Ratio term: determined restoration and if FC have equal magnitutude  
+    Ratio = ifelse(
+      pmax(abs(BvA), abs(CvB)) == 0,
+      0,
+      pmin(abs(BvA), abs(CvB)) /
+            pmax(abs(BvA), abs(CvB))),
+
+    # P-value weight: statistical significance weight
+    P_valueCvB_weight = ifelse(
+      P_valueCvB < 0.05,
+      1,
+      log10(P_valueCvB) / log10(0.05)
+    ),
+
+    # Calculate MElaS value using sign, ration and p-value weight
+    MElaS = Sign *
+            (abs(BvA) +
+             abs(CvB) * P_valueCvB_weight) *
+            Ratio
+  )
+
+# Export MElaS values as a csv
+write.csv(MElaS_Values, "MElaS_Values.csv", row.names = FALSE)
+```
